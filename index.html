@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <title>📒 スマート家計簿</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/tesseract.js@v4.0.1/dist/tesseract.min.js"></script>
+    <style>
+        * { -webkit-tap-highlight-color: transparent; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', sans-serif; }
+        .tab-active { border-bottom: 3px solid #0d9488; color: #0d9488; font-weight: 700; }
+        .tab-inactive { border-bottom: 3px solid transparent; color: #9ca3af; }
+        .category-btn.selected { background-color: #0d9488; color: white; border-color: #0d9488; }
+        #cameraFeed { width: 100%; border-radius: 12px; background: #000; display: block; }
+        .slide-up { animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .spinner { border: 3px solid #e5e7eb; border-top: 3px solid #0d9488; border-radius: 50%; width: 28px; height: 28px; animation: spin 0.8s linear infinite; margin: 0 auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
+        .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: #1f2937; color: white; padding: 10px 20px; border-radius: 20px; font-size: 14px; z-index: 1000; animation: fadeInOut 2.5s ease forwards; white-space: nowrap; }
+        @keyframes fadeInOut { 0%{opacity:0;transform:translateX(-50%) translateY(10px)} 15%{opacity:1;transform:translateX(-50%) translateY(0)} 70%{opacity:1} 100%{opacity:0} }
+        .delete-btn { opacity: 0.6; }
+        .delete-btn:hover { opacity: 1; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen">
+
+    <!-- ヘッダー -->
+    <header class="bg-teal-600 text-white px-4 pt-10 pb-4 sticky top-0 z-10 shadow-md">
+        <div class="max-w-lg mx-auto">
+            <h1 class="text-xl font-bold">📒 スマート家計簿</h1>
+            <p class="text-xs text-teal-200 mt-0.5">データはこの端末のみに保存されます</p>
+        </div>
+    </header>
+
+    <!-- タブナビ -->
+    <nav class="bg-white shadow-sm sticky top-[88px] z-10">
+        <div class="max-w-lg mx-auto flex">
+            <button class="flex-1 py-3 text-sm tab-active" id="tab-camera" onclick="switchTab('camera')">📷 撮影・入力</button>
+            <button class="flex-1 py-3 text-sm tab-inactive" id="tab-list" onclick="switchTab('list')">📋 記録一覧</button>
+            <button class="flex-1 py-3 text-sm tab-inactive" id="tab-summary" onclick="switchTab('summary')">📊 集計</button>
+        </div>
+    </nav>
+
+    <div class="max-w-lg mx-auto px-4 py-4 pb-20">
+
+        <!-- ===== タブ1: 撮影・入力 ===== -->
+        <div id="page-camera">
+
+            <!-- 入力モード切替 -->
+            <div class="flex bg-gray-100 rounded-xl p-1 mb-4">
+                <button id="mode-photo-btn" onclick="setMode('photo')"
+                    class="flex-1 py-2.5 rounded-lg text-sm font-semibold transition bg-white shadow text-teal-700">
+                    📷 レシート撮影
+                </button>
+                <button id="mode-manual-btn" onclick="setMode('manual')"
+                    class="flex-1 py-2.5 rounded-lg text-sm font-semibold transition text-gray-500">
+                    ✏️ 手動入力
+                </button>
+            </div>
+
+            <!-- ===== 撮影モード ===== -->
+            <div id="mode-photo">
+
+                <!-- カメラ起動ボタン / プレビュー -->
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4">
+                    <div id="camera-idle" class="text-center py-6">
+                        <div class="text-5xl mb-3">📷</div>
+                        <p class="text-sm text-gray-500 mb-4">レシートや明細をカメラで撮影すると<br>金額・日付を自動読み取りします</p>
+                        <button onclick="startCamera()" class="w-full bg-teal-600 text-white py-3 rounded-xl font-bold text-base shadow active:scale-95 transition mb-3">
+                            カメラを起動する
+                        </button>
+                        <p class="text-xs text-gray-400 mb-2">または</p>
+                        <label class="block w-full text-center bg-gray-100 text-gray-700 py-3 rounded-xl font-semibold text-sm cursor-pointer active:bg-gray-200">
+                            ギャラリーから選択
+                            <input type="file" id="imageInput" accept="image/*" class="hidden" onchange="handleFileSelect(event)">
+                        </label>
+                    </div>
+
+                    <!-- リアルタイムカメラビュー -->
+                    <div id="camera-view" class="hidden">
+                        <video id="cameraFeed" autoplay playsinline muted></video>
+                        <canvas id="cameraCanvas" class="hidden"></canvas>
+                        <div class="flex gap-2 mt-3">
+                            <button onclick="capturePhoto()" class="flex-1 bg-teal-600 text-white py-3 rounded-xl font-bold text-base active:scale-95 transition">
+                                📸 撮影する
+                            </button>
+                            <button onclick="stopCamera()" class="bg-gray-200 text-gray-600 px-4 py-3 rounded-xl font-bold active:scale-95 transition">
+                                ✕
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 撮影後プレビュー -->
+                    <div id="camera-preview" class="hidden">
+                        <img id="previewImg" src="" alt="撮影画像" class="w-full rounded-xl mb-3 border">
+                        <button onclick="retakePhoto()" class="w-full bg-gray-100 text-gray-700 py-2.5 rounded-xl font-semibold text-sm mb-2 active:bg-gray-200 transition">
+                            撮り直す
+                        </button>
+                    </div>
+                </div>
+
+                <!-- OCR解析中 -->
+                <div id="ocr-loading" class="hidden bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4 text-center">
+                    <div class="spinner mb-3"></div>
+                    <p class="text-sm font-semibold text-teal-700">読み取り中...</p>
+                    <p class="text-xs text-gray-400 mt-1"><span id="ocrProgress">0</span>% 完了</p>
+                </div>
+
+            </div>
+
+            <!-- ===== 手動入力モード ===== -->
+            <div id="mode-manual" class="hidden">
+                <!-- 空の状態 (フォームはOCR後・手動で共用) -->
+            </div>
+
+            <!-- ===== 共通: 入力フォーム ===== -->
+            <div id="input-form" class="slide-up bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4">
+                <h3 class="font-bold text-gray-700 mb-4 text-sm flex items-center gap-2">
+                    <span id="form-title-icon">✏️</span>
+                    <span id="form-title-text">内容を入力してください</span>
+                </h3>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs text-gray-500 font-bold mb-1">日付</label>
+                        <input type="date" id="inputDate" class="w-full p-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 font-bold mb-1">金額 (円)</label>
+                        <input type="number" id="inputAmount" inputmode="numeric" placeholder="0"
+                            class="w-full p-3 border rounded-xl text-right text-xl font-bold focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 font-bold mb-1">カテゴリ</label>
+                        <div class="grid grid-cols-4 gap-2" id="categoryButtons">
+                            <!-- JS で生成 -->
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 font-bold mb-1">メモ (任意)</label>
+                        <input type="text" id="inputMemo" placeholder="お店名など"
+                            class="w-full p-3 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    </div>
+                    <button id="saveBtn" onclick="saveEntry()"
+                        class="w-full bg-teal-600 text-white p-3.5 rounded-xl font-bold text-base shadow-md active:scale-95 transition">
+                        💾 家計簿に記録する
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ===== タブ2: 記録一覧 ===== -->
+        <div id="page-list" class="hidden">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="font-bold text-gray-700">記録一覧</h2>
+                <div class="flex gap-2">
+                    <button onclick="exportCSV()" class="text-xs text-gray-600 border border-gray-300 px-3 py-1.5 rounded-lg active:bg-gray-50">
+                        CSV出力
+                    </button>
+                    <button onclick="confirmClear()" class="text-xs text-red-500 border border-red-200 px-3 py-1.5 rounded-lg active:bg-red-50">
+                        全削除
+                    </button>
+                </div>
+            </div>
+
+            <!-- フィルター -->
+            <div class="bg-white rounded-xl p-3 mb-3 border border-gray-100 shadow-sm">
+                <div class="flex gap-2">
+                    <select id="filterMonth" onchange="renderList()" class="flex-1 text-sm p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400">
+                        <option value="">すべての月</option>
+                    </select>
+                    <select id="filterCategory" onchange="renderList()" class="flex-1 text-sm p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-400">
+                        <option value="">すべてのカテゴリ</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="historyList" class="space-y-2"></div>
+        </div>
+
+        <!-- ===== タブ3: 集計 ===== -->
+        <div id="page-summary" class="hidden">
+            <div class="mb-4">
+                <select id="summaryMonth" onchange="renderSummary()" class="w-full text-sm p-3 border rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-teal-400">
+                    <option value="">すべての期間</option>
+                </select>
+            </div>
+
+            <!-- 合計カード -->
+            <div class="bg-teal-600 text-white rounded-2xl p-5 mb-4 shadow-md">
+                <p class="text-sm text-teal-200">合計支出</p>
+                <p class="text-4xl font-bold mt-1">¥<span id="summaryTotal">0</span></p>
+                <p class="text-xs text-teal-300 mt-2"><span id="summaryCount">0</span>件の記録</p>
+            </div>
+
+            <!-- カテゴリ別 -->
+            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+                <h3 class="font-bold text-gray-700 text-sm mb-3">カテゴリ別内訳</h3>
+                <div id="categoryBreakdown" class="space-y-3"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 下部ナビゲーション (スマホ向け) -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 safe-area-inset-bottom z-20">
+        <div class="max-w-lg mx-auto flex">
+            <button onclick="switchTab('camera')" class="flex-1 py-3 flex flex-col items-center gap-0.5">
+                <span class="text-xl">📷</span>
+                <span class="text-xs text-gray-500">入力</span>
+            </button>
+            <button onclick="switchTab('list')" class="flex-1 py-3 flex flex-col items-center gap-0.5">
+                <span class="text-xl">📋</span>
+                <span class="text-xs text-gray-500">一覧</span>
+            </button>
+            <button onclick="switchTab('summary')" class="flex-1 py-3 flex flex-col items-center gap-0.5">
+                <span class="text-xl">📊</span>
+                <span class="text-xs text-gray-500">集計</span>
+            </button>
+        </div>
+    </nav>
+
+<script>
+// ===== 定数 =====
+const CATEGORIES = [
+    { id: 'food',      label: '食費',   emoji: '🍽️' },
+    { id: 'daily',     label: '日用品', emoji: '🧴' },
+    { id: 'traffic',   label: '交通',   emoji: '🚃' },
+    { id: 'health',    label: '医療',   emoji: '💊' },
+    { id: 'utility',   label: '光熱費', emoji: '💡' },
+    { id: 'enter',     label: '娯楽',   emoji: '🎮' },
+    { id: 'clothes',   label: '衣服',   emoji: '👕' },
+    { id: 'other',     label: 'その他', emoji: '📦' },
+];
+
+// ===== データ管理 =====
+let db = JSON.parse(localStorage.getItem('kakeibo_v2')) || [];
+let selectedCategory = 'other';
+let currentMode = 'photo';
+let cameraStream = null;
+let capturedBlob = null;
+
+// ===== 初期化 =====
+function init() {
+    buildCategoryButtons();
+    setTodayDate();
+    renderList();
+    renderSummary();
+    updateMonthFilters();
+
+    // 手動入力モードは最初からフォームを表示
+    document.getElementById('input-form').classList.remove('hidden');
+}
+
+function setTodayDate() {
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('inputDate').value = today;
+}
+
+function buildCategoryButtons() {
+    const container = document.getElementById('categoryButtons');
+    container.innerHTML = '';
+    CATEGORIES.forEach(cat => {
+        const btn = document.createElement('button');
+        btn.className = 'category-btn py-2 px-1 border rounded-xl text-xs font-semibold transition active:scale-95 flex flex-col items-center gap-0.5 border-gray-200';
+        btn.dataset.id = cat.id;
+        btn.innerHTML = `<span class="text-base">${cat.emoji}</span><span>${cat.label}</span>`;
+        btn.onclick = () => selectCategory(cat.id);
+        if (cat.id === selectedCategory) btn.classList.add('selected');
+        container.appendChild(btn);
+    });
+}
+
+function selectCategory(id) {
+    selectedCategory = id;
+    document.querySelectorAll('.category-btn').forEach(btn => {
+        btn.classList.toggle('selected', btn.dataset.id === id);
+    });
+}
+
+// ===== タブ切り替え =====
+function switchTab(tab) {
+    ['camera', 'list', 'summary'].forEach(t => {
+        document.getElementById(`page-${t}`).classList.toggle('hidden', t !== tab);
+        const tabEl = document.getElementById(`tab-${t}`);
+        if (tabEl) {
+            tabEl.className = `flex-1 py-3 text-sm ${t === tab ? 'tab-active' : 'tab-inactive'}`;
+        }
+    });
+    if (tab === 'list') renderList();
+    if (tab === 'summary') renderSummary();
+}
+
+// ===== 入力モード切替 =====
+function setMode(mode) {
+    currentMode = mode;
+    document.getElementById('mode-photo').classList.toggle('hidden', mode !== 'photo');
+    document.getElementById('mode-manual').classList.toggle('hidden', mode !== 'manual');
+
+    const photoBtn = document.getElementById('mode-photo-btn');
+    const manualBtn = document.getElementById('mode-manual-btn');
+    if (mode === 'photo') {
+        photoBtn.className = 'flex-1 py-2.5 rounded-lg text-sm font-semibold transition bg-white shadow text-teal-700';
+        manualBtn.className = 'flex-1 py-2.5 rounded-lg text-sm font-semibold transition text-gray-500';
+        document.getElementById('form-title-icon').textContent = '📷';
+        document.getElementById('form-title-text').textContent = '読み取り結果を確認・修正';
+    } else {
+        manualBtn.className = 'flex-1 py-2.5 rounded-lg text-sm font-semibold transition bg-white shadow text-teal-700';
+        photoBtn.className = 'flex-1 py-2.5 rounded-lg text-sm font-semibold transition text-gray-500';
+        document.getElementById('form-title-icon').textContent = '✏️';
+        document.getElementById('form-title-text').textContent = '内容を入力してください';
+        setTodayDate();
+        document.getElementById('inputAmount').value = '';
+        document.getElementById('inputMemo').value = '';
+    }
+}
+
+// ===== カメラ機能 =====
+async function startCamera() {
+    try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 960 } },
+            audio: false
+        });
+        const video = document.getElementById('cameraFeed');
+        video.srcObject = cameraStream;
+        document.getElementById('camera-idle').classList.add('hidden');
+        document.getElementById('camera-view').classList.remove('hidden');
+        document.getElementById('camera-preview').classList.add('hidden');
+    } catch (err) {
+        showToast('カメラを起動できませんでした。ギャラリーからお選びください。');
+        console.error(err);
+    }
+}
+
+function stopCamera() {
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
+    }
+    document.getElementById('camera-view').classList.add('hidden');
+    document.getElementById('camera-idle').classList.remove('hidden');
+}
+
+function capturePhoto() {
+    const video = document.getElementById('cameraFeed');
+    const canvas = document.getElementById('cameraCanvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    stopCamera();
+
+    canvas.toBlob(blob => {
+        capturedBlob = blob;
+        const url = URL.createObjectURL(blob);
+        showPreviewAndOCR(url, blob);
+    }, 'image/jpeg', 0.9);
+}
+
+function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    capturedBlob = file;
+    const url = URL.createObjectURL(file);
+    showPreviewAndOCR(url, file);
+}
+
+function retakePhoto() {
+    document.getElementById('camera-preview').classList.add('hidden');
+    document.getElementById('camera-idle').classList.remove('hidden');
+    document.getElementById('ocr-loading').classList.add('hidden');
+    capturedBlob = null;
+}
+
+function showPreviewAndOCR(url, blob) {
+    document.getElementById('camera-idle').classList.add('hidden');
+    document.getElementById('previewImg').src = url;
+    document.getElementById('camera-preview').classList.remove('hidden');
+    runOCR(blob);
+}
+
+// ===== OCR =====
+async function runOCR(imageSource) {
+    const loadingEl = document.getElementById('ocr-loading');
+    const progressEl = document.getElementById('ocrProgress');
+    loadingEl.classList.remove('hidden');
+
+    try {
+        const { data: { text } } = await Tesseract.recognize(imageSource, 'jpn+eng', {
+            logger: m => {
+                if (m.status === 'recognizing text') {
+                    progressEl.textContent = Math.floor(m.progress * 100);
+                }
+            }
+        });
+
+        loadingEl.classList.add('hidden');
+        const { date, amount, memo } = parseReceiptText(text);
+
+        document.getElementById('inputDate').value = date;
+        document.getElementById('inputAmount').value = amount || '';
+        document.getElementById('inputMemo').value = memo;
+        document.getElementById('form-title-icon').textContent = '✅';
+        document.getElementById('form-title-text').textContent = '読み取り完了！内容を確認してください';
+
+        if (amount) showToast(`¥${parseInt(amount).toLocaleString()} を読み取りました`);
+        else showToast('金額を手動で入力してください');
+
+    } catch (err) {
+        loadingEl.classList.add('hidden');
+        showToast('読み取りに失敗しました。手動で入力してください。');
+        console.error(err);
+    }
+}
+
+function parseReceiptText(text) {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+    // 日付
+    let date = new Date().toISOString().split('T')[0];
+    const datePatterns = [
+        /(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/,
+        /(\d{2})[\/\-](\d{1,2})[\/\-](\d{1,2})/,
+        /令和(\d+)年(\d{1,2})月(\d{1,2})日/,
+    ];
+    for (const pat of datePatterns) {
+        const m = text.match(pat);
+        if (m) {
+            let y = parseInt(m[1]);
+            if (pat.source.includes('令和')) y = 2018 + y;
+            else if (y < 100) y = 2000 + y;
+            date = `${y}-${String(parseInt(m[2])).padStart(2,'0')}-${String(parseInt(m[3])).padStart(2,'0')}`;
+            break;
+        }
+    }
+
+    // 金額 - 「合計」「お買上」「計」などのキーワード行を優先
+    let amount = 0;
+    const totalKeywords = ['合計', 'お買上', '小計', '計', 'TOTAL', 'Total', 'AMOUNT', '税込'];
+    for (const line of lines) {
+        if (totalKeywords.some(kw => line.includes(kw))) {
+            const numStr = line.replace(/[¥￥,，、\s]/g, '').match(/\d{2,6}/);
+            if (numStr) {
+                const val = parseInt(numStr[0]);
+                if (val > amount) amount = val;
+            }
+        }
+    }
+    // キーワードで見つからない場合は最大の数字
+    if (amount === 0) {
+        const numbers = [];
+        for (const line of lines) {
+            const clean = line.replace(/[¥￥,，、]/g, '').match(/\b(\d{2,6})\b/g);
+            if (clean) clean.forEach(n => { const v = parseInt(n); if (v >= 10 && v <= 999999) numbers.push(v); });
+        }
+        if (numbers.length > 0) amount = Math.max(...numbers);
+    }
+
+    // メモ: 1行目か店名っぽい行
+    let memo = '';
+    if (lines.length > 0) memo = lines[0].substring(0, 20);
+
+    return { date, amount: amount || '', memo };
+}
+
+// ===== データ保存 =====
+function saveEntry() {
+    const date = document.getElementById('inputDate').value;
+    const amount = document.getElementById('inputAmount').value;
+    const memo = document.getElementById('inputMemo').value;
+
+    if (!date) { showToast('日付を入力してください'); return; }
+    if (!amount || parseInt(amount) <= 0) { showToast('金額を入力してください'); return; }
+
+    db.push({
+        id: Date.now(),
+        date,
+        amount: parseInt(amount),
+        category: selectedCategory,
+        memo
+    });
+    localStorage.setItem('kakeibo_v2', JSON.stringify(db));
+    updateMonthFilters();
+    showToast('✅ 記録しました！');
+
+    // フォームリセット
+    setTodayDate();
+    document.getElementById('inputAmount').value = '';
+    document.getElementById('inputMemo').value = '';
+    selectCategory('other');
+    retakePhoto();
+    document.getElementById('camera-idle').classList.remove('hidden');
+    document.getElementById('imageInput').value = '';
+    document.getElementById('form-title-icon').textContent = '✏️';
+    document.getElementById('form-title-text').textContent = '読み取り結果を確認・修正';
+
+    // 一覧タブへ切替
+    setTimeout(() => switchTab('list'), 800);
+}
+
+// ===== 一覧表示 =====
+function renderList() {
+    const listEl = document.getElementById('historyList');
+    const filterMonth = document.getElementById('filterMonth').value;
+    const filterCat = document.getElementById('filterCategory').value;
+
+    let data = [...db].sort((a, b) => new Date(b.date) - new Date(a.date));
+    if (filterMonth) data = data.filter(d => d.date.startsWith(filterMonth));
+    if (filterCat) data = data.filter(d => d.category === filterCat);
+
+    if (data.length === 0) {
+        listEl.innerHTML = `<div class="text-center py-12 text-gray-400">
+            <div class="text-5xl mb-3">📭</div>
+            <p class="text-sm">記録がありません</p>
+        </div>`;
+        return;
+    }
+
+    let html = '';
+    let prevDate = '';
+    data.forEach(item => {
+        const cat = CATEGORIES.find(c => c.id === item.category) || CATEGORIES[7];
+        if (item.date !== prevDate) {
+            html += `<p class="text-xs text-gray-400 font-bold pt-2 pb-1 px-1">${formatDate(item.date)}</p>`;
+            prevDate = item.date;
+        }
+        html += `
+        <div class="flex items-center bg-white rounded-xl p-3 shadow-sm border border-gray-100 gap-3 slide-up">
+            <span class="text-2xl">${cat.emoji}</span>
+            <div class="flex-1 min-w-0">
+                <div class="text-xs text-gray-400">${cat.label}</div>
+                <div class="text-sm text-gray-600 truncate">${item.memo || '—'}</div>
+            </div>
+            <div class="text-right">
+                <div class="font-bold text-gray-800">¥${item.amount.toLocaleString()}</div>
+            </div>
+            <button onclick="deleteEntry(${item.id})" class="delete-btn text-gray-300 text-xl pl-2 active:text-red-400">🗑</button>
+        </div>`;
+    });
+    listEl.innerHTML = html;
+}
+
+function deleteEntry(id) {
+    if (!confirm('この記録を削除しますか？')) return;
+    db = db.filter(d => d.id !== id);
+    localStorage.setItem('kakeibo_v2', JSON.stringify(db));
+    updateMonthFilters();
+    renderList();
+    showToast('削除しました');
+}
+
+function confirmClear() {
+    if (!confirm('すべての記録を削除しますか？\nこの操作は取り消せません。')) return;
+    db = [];
+    localStorage.setItem('kakeibo_v2', JSON.stringify(db));
+    updateMonthFilters();
+    renderList();
+    renderSummary();
+    showToast('全データを削除しました');
+}
+
+// ===== 集計表示 =====
+function renderSummary() {
+    const filterMonth = document.getElementById('summaryMonth').value;
+    let data = filterMonth ? db.filter(d => d.date.startsWith(filterMonth)) : db;
+
+    const total = data.reduce((s, d) => s + d.amount, 0);
+    document.getElementById('summaryTotal').textContent = total.toLocaleString();
+    document.getElementById('summaryCount').textContent = data.length;
+
+    const breakdown = {};
+    CATEGORIES.forEach(c => { breakdown[c.id] = 0; });
+    data.forEach(d => { breakdown[d.category] = (breakdown[d.category] || 0) + d.amount; });
+
+    const sorted = CATEGORIES.filter(c => breakdown[c.id] > 0)
+        .sort((a, b) => breakdown[b.id] - breakdown[a.id]);
+
+    const container = document.getElementById('categoryBreakdown');
+    if (sorted.length === 0) {
+        container.innerHTML = '<p class="text-gray-400 text-sm text-center py-4">データがありません</p>';
+        return;
+    }
+    const max = sorted[0] ? breakdown[sorted[0].id] : 1;
+    container.innerHTML = sorted.map(cat => {
+        const pct = total > 0 ? Math.round(breakdown[cat.id] / total * 100) : 0;
+        const barW = Math.round(breakdown[cat.id] / max * 100);
+        return `
+        <div>
+            <div class="flex justify-between items-center mb-1">
+                <span class="text-sm flex items-center gap-1.5">${cat.emoji} ${cat.label}</span>
+                <span class="text-sm font-bold">¥${breakdown[cat.id].toLocaleString()} <span class="text-xs text-gray-400">${pct}%</span></span>
+            </div>
+            <div class="bg-gray-100 rounded-full h-2"><div class="bg-teal-500 h-2 rounded-full transition-all" style="width:${barW}%"></div></div>
+        </div>`;
+    }).join('');
+}
+
+// ===== CSV出力 =====
+function exportCSV() {
+    if (db.length === 0) { showToast('記録がありません'); return; }
+    const bom = '﻿';
+    let csv = bom + '日付,金額,カテゴリ,メモ\n';
+    [...db].sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(d => {
+        const cat = CATEGORIES.find(c => c.id === d.category)?.label || 'その他';
+        csv += `${d.date},${d.amount},${cat},"${(d.memo || '').replace(/"/g, '""')}"\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kakeibo_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+// ===== ユーティリティ =====
+function updateMonthFilters() {
+    const months = [...new Set(db.map(d => d.date.slice(0, 7)))].sort().reverse();
+    const catOptions = CATEGORIES.map(c => `<option value="${c.id}">${c.emoji} ${c.label}</option>`).join('');
+
+    ['filterMonth', 'summaryMonth'].forEach(id => {
+        const sel = document.getElementById(id);
+        const cur = sel.value;
+        sel.innerHTML = `<option value="">すべての${id === 'summaryMonth' ? '期間' : '月'}</option>` +
+            months.map(m => `<option value="${m}" ${m === cur ? 'selected' : ''}>${m.replace('-', '年')}月</option>`).join('');
+    });
+
+    const filterCat = document.getElementById('filterCategory');
+    const curCat = filterCat.value;
+    filterCat.innerHTML = `<option value="">すべてのカテゴリ</option>` + catOptions;
+    filterCat.value = curCat;
+}
+
+function formatDate(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    const days = ['日', '月', '火', '水', '木', '金', '土'];
+    return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 (${days[d.getDay()]})`;
+}
+
+function showToast(msg) {
+    const existing = document.querySelector('.toast');
+    if (existing) existing.remove();
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2600);
+}
+
+// 起動
+init();
+</script>
+</body>
+</html>
