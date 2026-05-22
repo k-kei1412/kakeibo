@@ -323,20 +323,37 @@ function setMode(mode) {
 
 // ===== カメラ機能 =====
 async function startCamera() {
-    try {
-        cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 960 } },
-            audio: false
-        });
-        const video = document.getElementById('cameraFeed');
-        video.srcObject = cameraStream;
-        document.getElementById('camera-idle').classList.add('hidden');
-        document.getElementById('camera-view').classList.remove('hidden');
-        document.getElementById('camera-preview').classList.add('hidden');
-    } catch (err) {
-        showToast('カメラを起動できませんでした。ギャラリーからお選びください。');
-        console.error(err);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showToast('このブラウザはカメラ非対応です。Chromeをお試しください。');
+        return;
     }
+
+    // 背面カメラ優先 → 制約なしの順でフォールバック
+    const constraints = [
+        { video: { facingMode: { exact: 'environment' } }, audio: false },
+        { video: { facingMode: 'environment' }, audio: false },
+        { video: true, audio: false }
+    ];
+
+    for (const constraint of constraints) {
+        try {
+            cameraStream = await navigator.mediaDevices.getUserMedia(constraint);
+            const video = document.getElementById('cameraFeed');
+            video.srcObject = cameraStream;
+            await video.play();
+            document.getElementById('camera-idle').classList.add('hidden');
+            document.getElementById('camera-view').classList.remove('hidden');
+            document.getElementById('camera-preview').classList.add('hidden');
+            return;
+        } catch (err) {
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                showToast('カメラ許可が必要です。アドレスバー横の🔒→カメラを「許可」に変更してください。');
+                return;
+            }
+            // 次の制約で再試行
+        }
+    }
+    showToast('カメラを起動できませんでした。ギャラリーから選択してください。');
 }
 
 function stopCamera() {
