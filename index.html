@@ -763,6 +763,7 @@ function parseReceiptText(rawText) {
     const text = rawText.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
+    // --- 日付抽出 ---
     let date = new Date().toISOString().split('T')[0];
     const datePatterns = [
         { re: /(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/, reiwa: false },
@@ -785,36 +786,43 @@ function parseReceiptText(rawText) {
         }
     }
 
+    // ¥マーク付き金額を行から抽出するヘルパー（最大値を返す）
+    function extractYen(line) {
+        const norm = line.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+        const ms = [...norm.matchAll(/[¥￥]\s*([\d,]+)/g)];
+        if (!ms.length) return 0;
+        const vals = ms.map(m => parseInt(m[1].replace(/,/g,''))).filter(v => v >= 100 && v <= 999999);
+        return vals.length ? Math.max(...vals) : 0;
+    }
+
+    // --- 合計金額抽出（キーワード＋¥マークの行のみ） ---
     let amount = 0;
-    const totalKeywords = /合計|お買上|買上|税込|税込計|小計|お支払|請求|TOTAL|total|AMOUNT/;
-    const excludeKeywords = /税抜|内税|外税|値引|割引|ポイント/;
-    for (const line of lines) {
-        if (totalKeywords.test(line) && !excludeKeywords.test(line)) {
-            const fixed = fixOcrErrors(line);
-            const matches = fixed.match(/\d[\d,]*/g);
-            if (matches) matches.forEach(n => {
-                const v = parseInt(n.replace(/,/g, ''));
-                if (v >= 100 && v <= 999999 && v > amount) amount = v;
-            });
+    const highKw = /税込合計|税込|ご請求金額|お支払い金額|お支払合計|お支払|合計金額|請求金額/;
+    const midKw  = /合計|TOTAL|total|AMOUNT/;
+    const exKw   = /税抜|内税|外税|値引|割引|ポイント|お釣|預かり|小計/;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!highKw.test(line) || exKw.test(line)) continue;
+        let v = extractYen(line);
+        if (v === 0 && i + 1 < lines.length) v = extractYen(lines[i + 1]);
+        if (v > amount) amount = v;
+    }
+    if (amount === 0) {
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (!midKw.test(line) || exKw.test(line)) continue;
+            let v = extractYen(line);
+            if (v === 0 && i + 1 < lines.length) v = extractYen(lines[i + 1]);
+            if (v > amount) amount = v;
         }
     }
     if (amount === 0) {
-        const yenMatches = text.match(/[¥￥]\s*(\d[\d,]*)/g);
-        if (yenMatches) yenMatches.forEach(m => {
-            const v = parseInt(fixOcrErrors(m).replace(/[¥￥\s,]/g, ''));
+        const ms = [...text.matchAll(/[¥￥]\s*([\d,]+)/g)];
+        ms.forEach(m => {
+            const v = parseInt(m[1].replace(/,/g,''));
             if (v >= 100 && v <= 999999 && v > amount) amount = v;
         });
-    }
-    if (amount === 0) {
-        const nums = [];
-        for (const line of lines) {
-            const ms = fixOcrErrors(line).match(/\b\d[\d,]*\b/g);
-            if (ms) ms.forEach(n => {
-                const v = parseInt(n.replace(/,/g,''));
-                if (v >= 100 && v <= 99999) nums.push(v);
-            });
-        }
-        if (nums.length) amount = Math.max(...nums);
     }
 
     let memo = '';
@@ -825,29 +833,75 @@ function parseReceiptText(rawText) {
         }
     }
 
-    // 商品行の自動抽出（合計・税・値引き行は除外）
+    // --- 商品行抽出 ---
     const items = [];
-    const skipKw = /合計|小計|税|値引|割引|ポイント|お釣|預かり|TOTAL|AMOUNT|お買上|請求|お支払/;
+    const totalKw   = /合計|小計|税|お支払|請求|TOTAL|AMOUNT|お買上|お釣|預かり/;
+    const discountKw = /値引|割引|ポイント|クーポン|discount/i;
+
     for (const line of lines) {
-        if (skipKw.test(line)) continue;
-        // パターン①: 商品名×N ¥price（行合計）
-        const mQty = line.match(/^(.+?)\s*[×xｘ]\s*(\d+)\s*[¥￥]\s*([\d,]+)/);
-        if (mQty) {
-            const name = mQty[1].replace(/^[\d\s\.\*①-⑳\-]+/, '').trim();
-            const qty = parseInt(mQty[2]);
-            const lineTotal = parseInt(mQty[3].replace(/,/g, ''));
-            const price = Math.round(lineTotal / qty);
-            if (price >= 10 && price <= 99999 && name.length >= 1)
-                items.push({ name, qty, price, category: 'other' });
+        // 割引・値引き → マイナス金額
+        if (discountKw.test(line)) {
+            const mD = line.match(/[\-−]\s*[¥￥]?\s*([\d,]+)|[¥￥]\s*([\d,]+)/);
+            if (mD) {
+                const raw = (mD[1] || mD[2]).replace(/,/g,'');
+                const v = parseInt(raw);
+                if (v >= 1 && v <= 99999) {
+                    const label = line.replace(/[¥￥\d,\s\-−]/g,'').trim().substring(0,10) || '割引';
+                    items.push({ name: label, qty: 1, price: -v, category: 'other' });
+                }
+            }
             continue;
         }
-        // パターン②: 商品名 ¥price（単品）
-        const mNoQty = line.match(/^(.+?)\s+[¥￥]\s*([\d,]+)\s*$/);
-        if (mNoQty) {
-            const name = mNoQty[1].replace(/^[\d\s\.\*①-⑳\-]+/, '').trim();
-            const price = parseInt(mNoQty[2].replace(/,/g, ''));
-            if (price >= 10 && price <= 99999 && name.length >= 1 && !/^[\d\s]+$/.test(name))
-                items.push({ name, qty: 1, price, category: 'other' });
+
+        // 合計・税などの行はスキップ
+        if (totalKw.test(line)) continue;
+
+        // パターンA: 商品名×N ¥行合計 → 単価=行合計÷N
+        const mA = line.match(/^(.*?)\s*[×xｘ]\s*(\d+)\s*[¥￥]\s*([\d,]+)/);
+        if (mA) {
+            const qty = parseInt(mA[2]);
+            const lineTotal = parseInt(mA[3].replace(/,/g,''));
+            const price = Math.round(lineTotal / qty);
+            if (qty >= 1 && qty <= 99 && price >= 10 && price <= 99999)
+                items.push({ name: '', qty, price, category: 'other' });
+            continue;
+        }
+
+        // パターンB: @単価×N または @単価 N個/N点/N本/N袋
+        const mB1 = line.match(/@\s*([\d,]+)\s*[×xｘ]\s*(\d+)/);
+        if (mB1) {
+            const price = parseInt(mB1[1].replace(/,/g,''));
+            const qty   = parseInt(mB1[2]);
+            if (qty >= 1 && qty <= 99 && price >= 10 && price <= 99999)
+                items.push({ name: '', qty, price, category: 'other' });
+            continue;
+        }
+        const mB2 = line.match(/@\s*([\d,]+)\s+(\d+)\s*(?:個|点|本|枚|袋|缶|箱)/);
+        if (mB2) {
+            const price = parseInt(mB2[1].replace(/,/g,''));
+            const qty   = parseInt(mB2[2]);
+            if (qty >= 1 && qty <= 99 && price >= 10 && price <= 99999)
+                items.push({ name: '', qty, price, category: 'other' });
+            continue;
+        }
+
+        // パターンC: N個×@単価 など（個数が先）
+        const mC = line.match(/(\d+)\s*(?:個|点|本|枚|袋)\s*[@＠]\s*([\d,]+)/);
+        if (mC) {
+            const qty   = parseInt(mC[1]);
+            const price = parseInt(mC[2].replace(/,/g,''));
+            if (qty >= 1 && qty <= 99 && price >= 10 && price <= 99999)
+                items.push({ name: '', qty, price, category: 'other' });
+            continue;
+        }
+
+        // パターンD: 商品名 ¥price（単品、¥マーク必須）
+        const mD2 = line.match(/^(.+?)\s+[¥￥]\s*([\d,]+)\s*$/);
+        if (mD2) {
+            const namePart = mD2[1].replace(/^[\d\s\.\*①-⑳\-＊]+/, '').trim();
+            const price = parseInt(mD2[2].replace(/,/g,''));
+            if (price >= 10 && price <= 99999 && !/^[\d\s]+$/.test(namePart))
+                items.push({ name: '', qty: 1, price, category: 'other' });
         }
     }
 
