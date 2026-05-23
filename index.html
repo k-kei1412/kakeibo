@@ -1057,8 +1057,8 @@ function renderItems() {
                     oninput="currentItems[${idx}].qty=Math.max(1,parseInt(this.value)||1);refreshItemSub(${idx},'item-sub-',currentItems)"
                     class="w-10 px-1 py-1.5 border rounded-lg text-xs text-center bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
                 <span class="text-xs text-gray-400 flex-shrink-0">¥</span>
-                <input type="number" value="${item.price}" min="0"
-                    oninput="currentItems[${idx}].price=Math.max(0,parseInt(this.value)||0);refreshItemSub(${idx},'item-sub-',currentItems)"
+                <input type="number" value="${item.price}"
+                    oninput="currentItems[${idx}].price=parseInt(this.value)||0;refreshItemSub(${idx},'item-sub-',currentItems)"
                     class="w-16 px-1 py-1.5 border rounded-lg text-xs text-right bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
             </div>
         </div>`;
@@ -1071,7 +1071,9 @@ function refreshItemSub(idx, prefix, arr) {
     const el = document.getElementById(prefix + idx);
     if (el) {
         const sub = item.qty * item.price;
-        el.textContent = sub > 0 ? '¥' + sub.toLocaleString() : '';
+        if (sub > 0) el.textContent = '¥' + sub.toLocaleString();
+        else if (sub < 0) el.textContent = '-¥' + Math.abs(sub).toLocaleString();
+        else el.textContent = '';
     }
     if (prefix === 'item-sub-') calcItemsTotal();
     else calcEditItemsTotal();
@@ -1080,14 +1082,14 @@ function refreshItemSub(idx, prefix, arr) {
 function calcItemsTotal() {
     const total = currentItems.reduce((s, i) => s + i.qty * i.price, 0);
     const noteEl = document.getElementById('items-total-note');
-    if (total > 0) {
-        noteEl.textContent = `内訳合計: ¥${total.toLocaleString()}`;
+    if (currentItems.length > 0) {
+        if (total >= 0) noteEl.textContent = `内訳合計: ¥${total.toLocaleString()}`;
+        else noteEl.textContent = `内訳合計: -¥${Math.abs(total).toLocaleString()}`;
         document.getElementById('inputAmount').value = total;
     } else {
         noteEl.textContent = '';
     }
-    // 2件以上の有効な商品があるときだけ「分けて記録」ボタンを表示
-    const validCount = currentItems.filter(i => i.price > 0).length;
+    const validCount = currentItems.filter(i => i.price !== 0).length;
     const splitBtn = document.getElementById('splitSaveBtn');
     if (splitBtn) splitBtn.classList.toggle('hidden', validCount < 2);
 }
@@ -1174,8 +1176,8 @@ function renderEditItems() {
                     oninput="editCurrentItems[${idx}].qty=Math.max(1,parseInt(this.value)||1);refreshItemSub(${idx},'edit-sub-',editCurrentItems)"
                     class="w-10 px-1 py-1.5 border rounded-lg text-xs text-center bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
                 <span class="text-xs text-gray-400 flex-shrink-0">¥</span>
-                <input type="number" value="${item.price}" min="0"
-                    oninput="editCurrentItems[${idx}].price=Math.max(0,parseInt(this.value)||0);refreshItemSub(${idx},'edit-sub-',editCurrentItems)"
+                <input type="number" value="${item.price}"
+                    oninput="editCurrentItems[${idx}].price=parseInt(this.value)||0;refreshItemSub(${idx},'edit-sub-',editCurrentItems)"
                     class="w-16 px-1 py-1.5 border rounded-lg text-xs text-right bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
             </div>
         </div>`;
@@ -1186,8 +1188,9 @@ function renderEditItems() {
 function calcEditItemsTotal() {
     const total = editCurrentItems.reduce((s, i) => s + i.qty * i.price, 0);
     const noteEl = document.getElementById('edit-items-total-note');
-    if (total > 0) {
-        noteEl.textContent = `内訳合計: ¥${total.toLocaleString()}`;
+    if (editCurrentItems.length > 0) {
+        if (total >= 0) noteEl.textContent = `内訳合計: ¥${total.toLocaleString()}`;
+        else noteEl.textContent = `内訳合計: -¥${Math.abs(total).toLocaleString()}`;
         document.getElementById('editAmount').value = total;
     } else {
         noteEl.textContent = '';
