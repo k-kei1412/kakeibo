@@ -151,6 +151,7 @@
                     <div>
                         <label class="block text-xs text-gray-500 font-bold mb-1">合計金額 (円)</label>
                         <input type="number" id="inputAmount" inputmode="numeric" placeholder="0"
+                            oninput="if(itemsVisible) calcItemsTotal()"
                             class="w-full p-3 border rounded-xl text-right text-xl font-bold focus:outline-none focus:ring-2 focus:ring-teal-400">
                     </div>
 
@@ -268,11 +269,11 @@
                 <div class="space-y-4">
                     <div>
                         <label class="block text-xs text-gray-500 font-bold mb-1">月間予算合計</label>
-                        <div class="flex items-center gap-2">
-                            <span class="text-gray-400 font-bold">¥</span>
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-gray-400 font-bold shrink-0">¥</span>
                             <input type="number" id="budgetTotalInput" inputmode="numeric" placeholder="例: 50000"
                                 oninput="updateBudgetUnallocated()"
-                                class="flex-1 p-3 border rounded-xl text-right text-xl font-bold focus:outline-none focus:ring-2 focus:ring-teal-400">
+                                class="min-w-0 flex-1 p-2.5 border rounded-xl text-right text-base font-bold focus:outline-none focus:ring-2 focus:ring-teal-400">
                         </div>
                     </div>
                     <div>
@@ -1119,11 +1120,18 @@ function calcItemsTotal() {
     const total = currentItems.reduce((s, i) => s + i.qty * i.price, 0);
     const noteEl = document.getElementById('items-total-note');
     if (currentItems.length > 0) {
-        if (total >= 0) noteEl.textContent = `内訳合計: ¥${total.toLocaleString()}`;
-        else noteEl.textContent = `内訳合計: -¥${Math.abs(total).toLocaleString()}`;
-        document.getElementById('inputAmount').value = total;
+        const entered = parseInt(document.getElementById('inputAmount').value) || 0;
+        const itemsStr = total >= 0 ? `¥${total.toLocaleString()}` : `-¥${Math.abs(total).toLocaleString()}`;
+        const diff = entered - total;
+        let diffHtml = '';
+        if (entered !== 0) {
+            if (diff === 0) diffHtml = `<span class="text-gray-400 ml-2">差額なし</span>`;
+            else if (diff > 0) diffHtml = `<span class="text-blue-500 ml-2">差額 +¥${diff.toLocaleString()}</span>`;
+            else diffHtml = `<span class="text-red-500 ml-2">差額 -¥${Math.abs(diff).toLocaleString()}</span>`;
+        }
+        noteEl.innerHTML = `内訳合計: ${itemsStr}${diffHtml}`;
     } else {
-        noteEl.textContent = '';
+        noteEl.innerHTML = '';
     }
     const validCount = currentItems.filter(i => i.price !== 0).length;
     const splitBtn = document.getElementById('splitSaveBtn');
