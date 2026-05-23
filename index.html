@@ -1521,8 +1521,17 @@ function saveBudgetFromModal() {
 
 function renderBudget(filterMonth, breakdown) {
     const section = document.getElementById('budget-section');
-    if (!filterMonth) { section.classList.add('hidden'); return; }
     section.classList.remove('hidden');
+
+    // 月未選択時は今月のデータで計算
+    let displayMonth = filterMonth;
+    let displayBreakdown = breakdown;
+    if (!filterMonth) {
+        const now = new Date();
+        displayMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const { breakdown: thisMonthBreakdown } = calcCategorySpending(displayMonth);
+        displayBreakdown = thisMonthBreakdown;
+    }
 
     const budget = loadBudget();
     const hasBudget = budget.total > 0 || Object.keys(budget.categories).length > 0;
@@ -1532,11 +1541,18 @@ function renderBudget(filterMonth, breakdown) {
         return;
     }
 
-    const totalSpent  = CATEGORIES.reduce((s, c) => s + (breakdown[c.id] || 0), 0);
+    const [dy, dm] = displayMonth.split('-');
+    const monthLabel = `${dy}年${parseInt(dm)}月`;
+
+    const totalSpent  = CATEGORIES.reduce((s, c) => s + (displayBreakdown[c.id] || 0), 0);
     const totalBudget = budget.total;
     const totalRem    = totalBudget - totalSpent;
     const pctTotal    = totalBudget > 0 ? Math.min(100, Math.round(totalSpent / totalBudget * 100)) : 0;
     const overTotal   = totalBudget > 0 && totalRem < 0;
+
+    // ヘッダーの月表示を更新
+    const hdr = section.querySelector('h3');
+    if (hdr) hdr.textContent = `💰 月間予算（${monthLabel}）`;
 
     let html = '';
 
@@ -1560,12 +1576,12 @@ function renderBudget(filterMonth, breakdown) {
     }
 
     // カテゴリ別
-    const rows = CATEGORIES.filter(c => (budget.categories[c.id] || 0) > 0 || (breakdown[c.id] || 0) > 0);
+    const rows = CATEGORIES.filter(c => (budget.categories[c.id] || 0) > 0 || (displayBreakdown[c.id] || 0) > 0);
     if (rows.length > 0) {
         html += '<div class="space-y-3">';
         rows.forEach(cat => {
             const catBudget = budget.categories[cat.id] || 0;
-            const catSpent  = breakdown[cat.id] || 0;
+            const catSpent  = displayBreakdown[cat.id] || 0;
             const catRem    = catBudget - catSpent;
             const isOver    = catBudget > 0 && catRem < 0;
             const pctCat    = catBudget > 0 ? Math.min(100, Math.round(catSpent / catBudget * 100)) : 0;
