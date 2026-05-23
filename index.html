@@ -619,12 +619,11 @@ async function runGeminiAnalysis(canvas) {
 }
 
 ■ total（合計金額）の決め方【最重要】
-下記の優先順位でレシートから最終支払い金額を探す:
+必ず「左側にキーワード＋右側に¥金額」の行から選ぶ。キーワードのない行の金額は絶対に使わない。
 ① 「税込合計」「税込」「ご請求金額」「お支払い金額」「お支払合計」のラベルが付いた¥金額
-② 「合計」「小計」「TOTAL」「AMOUNT」のラベルが付いた¥金額
-③ 上記がない場合は¥マーク付き金額の中で最大のもの
-複数の候補がある場合は「レシートの最下部に近い」または「最も大きい」金額を選ぶ。
-税抜金額・消費税額・預かり金・お釣りのみの行は使わない。
+② 上記がなければ「合計」「TOTAL」「AMOUNT」のラベルが付いた¥金額
+③ どちらもなければ total は 0 にする（推測しない）
+税抜金額・消費税額・小計・預かり金・お釣りのみの行は使わない。割引前の金額も使わない。
 
 ■ items（商品行）の抽出【全件漏れなく】
 画像を上から下へスキャンし、¥マークまたは「円」が付いた金額のある行をすべて抽出する:
@@ -726,13 +725,20 @@ async function runOCR(canvasOrBlob) {
         });
 
         loadingEl.classList.add('hidden');
-        const { date, amount, memo } = parseReceiptText(text);
+        const { date, amount, memo, items } = parseReceiptText(text);
 
         document.getElementById('inputDate').value   = date;
         document.getElementById('inputAmount').value = amount || '';
         // メモは自動入力しない
         document.getElementById('form-title-icon').textContent = '✅';
         document.getElementById('form-title-text').textContent = '読み取り完了！内容を確認してください';
+
+        if (items && items.length > 0) {
+            currentItems = items;
+            showItemsSection(true);
+            renderItems();
+            calcItemsTotal();
+        }
 
         if (amount) showToast(`¥${parseInt(amount).toLocaleString()} を読み取りました`);
         else        showToast('金額が読み取れませんでした。手動で入力してください。');
@@ -818,7 +824,34 @@ function parseReceiptText(rawText) {
             break;
         }
     }
-    return { date, amount: amount || '', memo };
+
+    // 商品行の自動抽出（合計・税・値引き行は除外）
+    const items = [];
+    const skipKw = /合計|小計|税|値引|割引|ポイント|お釣|預かり|TOTAL|AMOUNT|お買上|請求|お支払/;
+    for (const line of lines) {
+        if (skipKw.test(line)) continue;
+        // パターン①: 商品名×N ¥price（行合計）
+        const mQty = line.match(/^(.+?)\s*[×xｘ]\s*(\d+)\s*[¥￥]\s*([\d,]+)/);
+        if (mQty) {
+            const name = mQty[1].replace(/^[\d\s\.\*①-⑳\-]+/, '').trim();
+            const qty = parseInt(mQty[2]);
+            const lineTotal = parseInt(mQty[3].replace(/,/g, ''));
+            const price = Math.round(lineTotal / qty);
+            if (price >= 10 && price <= 99999 && name.length >= 1)
+                items.push({ name, qty, price, category: 'other' });
+            continue;
+        }
+        // パターン②: 商品名 ¥price（単品）
+        const mNoQty = line.match(/^(.+?)\s+[¥￥]\s*([\d,]+)\s*$/);
+        if (mNoQty) {
+            const name = mNoQty[1].replace(/^[\d\s\.\*①-⑳\-]+/, '').trim();
+            const price = parseInt(mNoQty[2].replace(/,/g, ''));
+            if (price >= 10 && price <= 99999 && name.length >= 1 && !/^[\d\s]+$/.test(name))
+                items.push({ name, qty: 1, price, category: 'other' });
+        }
+    }
+
+    return { date, amount: amount || '', memo, items };
 }
 
 // ===== 商品内訳管理（入力フォーム用） =====
