@@ -619,11 +619,12 @@ async function runGeminiAnalysis(canvas) {
 }
 
 ■ total（合計金額）の決め方【最重要】
+レシートの「合計」や「税込合計」のラベルは他の行より大きい文字・太字で印字されていることが多い。そのラベルの右側（または直下の行）にある金額が total。
 下記の優先順位で選ぶ:
-① 「税込合計」「税込」「ご請求金額」「お支払い金額」「お支払合計」のラベルが付いた金額
-② 上記がなければ「合計」「TOTAL」「AMOUNT」のラベルが付いた金額
-③ 上記もなければ、レシート下部に印字された最後の¥金額（お釣り・預かり金を除く）
-税抜金額・消費税額・小計・値引き前の金額は使わない。
+① 「税込合計」「税込」「ご請求金額」「お支払い金額」「お支払合計」のラベルの右の金額
+② 上記がなければ「合計」「TOTAL」「AMOUNT」のラベルの右の金額
+③ どちらもなければレシート下部最後の¥金額（お釣り・預かり金除く）
+税抜金額・消費税額・小計・値引き前の金額は絶対に使わない。
 
 ■ items（商品行）の抽出【全件漏れなく】
 画像を上から下へスキャンし、¥マークまたは「円」が付いた金額のある行をすべて抽出する:
@@ -787,14 +788,32 @@ function parseReceiptText(rawText) {
         }
     }
 
-    // OCR誤読を補正して行から数値を全て抽出
-    function getNumsFromLine(line, minV, maxV) {
-        const s = line
-            .replace(/[，,]/g, '')
-            .replace(/[¥￥]/g, '')   // ¥を除去して隣の数字を拾いやすく
-            .replace(/[oＯ]/g, '0')  // OCR誤読: o→0
-            .replace(/[lＩ]/g, '1'); // OCR誤読: l/I→1
-        return (s.match(/\d+/g) || []).map(Number).filter(v => v >= minV && v <= maxV);
+    // --- 合計金額抽出ヘルパー ---
+
+    // 千の位区切り（カンマ・ピリオド）を正規化して数字列を結合
+    function normNum(s) {
+        return s
+            .replace(/(\d)\s*[,，]\s*(\d{3})/g, '$1$2')   // 1,234 → 1234
+            .replace(/(\d)\s*\.\s*(\d{3})(?!\d)/g, '$1$2') // 1.234 → 1234（ピリオドが千区切りの場合）
+            .replace(/[,，]/g, '');
+    }
+
+    // 文字列から金額候補（minV〜maxV）を抽出
+    function extractAmounts(s, minV, maxV) {
+        const cleaned = normNum(s)
+            .replace(/[¥￥円]/g, ' ')  // ¥・円を空白に変換して数字を分離
+            .replace(/[oＯ]/g, '0')    // OCR誤読補正
+            .replace(/[lＩ]/g, '1');
+        return (cleaned.match(/\d+/g) || []).map(Number).filter(v => v >= minV && v <= maxV);
+    }
+
+    // キーワードの右側テキストから金額を取得（最も精度が高い）
+    function amountAfterKw(line, kwRe, minV, maxV) {
+        const m = line.match(kwRe);
+        if (!m) return 0;
+        const after = line.slice(m.index + m[0].length);
+        const nums = extractAmounts(after, minV, maxV);
+        return nums.length ? Math.max(...nums) : 0;
     }
 
     // --- 合計金額抽出 ---
@@ -802,23 +821,35 @@ function parseReceiptText(rawText) {
     const highKw = /税込合計|税込|ご請求金額|お支払い金額|お支払合計|お支払|合計金額|請求金額/;
     const midKw  = /合計|TOTAL|total|AMOUNT/;
     const exKw   = /税抜|内税|外税|値引|割引|ポイント|お釣|預かり|小計/;
+    const allKw  = /税込合計|税込|ご請求金額|お支払い金額|お支払合計|お支払|合計金額|請求金額|合計|TOTAL|total|AMOUNT/;
 
     function tryKw(kw) {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             if (!kw.test(line) || exKw.test(line)) continue;
-            let nums = getNumsFromLine(line, 100, 999999);
-            if (!nums.length && i + 1 < lines.length)
-                nums = getNumsFromLine(lines[i + 1], 100, 999999);
-            if (nums.length) { const v = Math.max(...nums); if (v > amount) amount = v; }
+
+            // ① キーワードの右側の数字を優先取得
+            let v = amountAfterKw(line, allKw, 100, 999999);
+
+            // ② 同じ行に数字がなければ次の1〜2行を確認
+            if (v === 0) {
+                for (let j = i + 1; j <= Math.min(i + 2, lines.length - 1); j++) {
+                    const next = lines[j];
+                    if (exKw.test(next)) break;
+                    const nums = extractAmounts(next, 100, 999999);
+                    if (nums.length) { v = Math.max(...nums); break; }
+                }
+            }
+
+            if (v > amount) amount = v;
         }
     }
     tryKw(highKw);
     if (amount === 0) tryKw(midKw);
     if (amount === 0) {
         // 最終フォールバック: ¥付き金額の最大値
-        for (const m of text.matchAll(/[¥￥]\s*([\d,]+)/g)) {
-            const v = parseInt(m[1].replace(/,/g,''));
+        for (const m of text.matchAll(/[¥￥]\s*([\d,\.]+)/g)) {
+            const v = parseInt(normNum(m[1]));
             if (v >= 100 && v <= 999999 && v > amount) amount = v;
         }
     }
@@ -833,34 +864,32 @@ function parseReceiptText(rawText) {
 
     // --- 商品行抽出 ---
     const items = [];
-    // 合計・税・支払い系の行はスキップ（"税"だけは広すぎるので消費税に限定）
     const totalKw    = /合計|小計|消費税|お支払|請求|TOTAL|AMOUNT|お買上|お釣|預かり/;
     const discountKw = /値引|割引|ポイント|クーポン|discount/i;
-    // 商品名を含む行かどうか（数字・記号・スペースだけでない）
+    // 数字・記号・スペースだけでない行 = 商品名を含む行
     const hasNameChars = /[^\d\s¥￥\/\-\.\,×xｘ@＠*＊#＃()（）%％]/;
 
     for (const line of lines) {
         // --- 割引・値引き → マイナス ---
         if (discountKw.test(line)) {
-            const nums = getNumsFromLine(line, 1, 99999);
+            const nums = extractAmounts(line, 1, 99999);
             if (nums.length) {
                 const v = Math.max(...nums);
-                const label = line.replace(/[\d¥￥\s,，\-−]/g,'').replace(/[値引割引ポイントクーポン]/g,'').trim().substring(0,10) || '割引';
+                const label = line.replace(/[\d¥￥\s,，\-−.]/g,'').trim().substring(0,10) || '割引';
                 items.push({ name: label || '割引', qty: 1, price: -v, category: 'other' });
             }
             continue;
         }
 
         if (totalKw.test(line)) continue;
-        if (!hasNameChars.test(line)) continue; // 数字・記号のみの行はスキップ
+        if (!hasNameChars.test(line)) continue;
 
-        // 正規化（全角数字・カンマ除去）
-        const L = line.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
-                      .replace(/[，,]/g, '')
-                      .replace(/[×ｘ]/g, 'x')
-                      .replace(/[@＠]/g, '@');
+        // 正規化
+        const L = normNum(line)
+            .replace(/[×ｘ]/g, 'x')
+            .replace(/[@＠]/g, '@');
 
-        // パターンA: "name×qty ¥total" → 単価 = total÷qty
+        // パターンA: name×qty ¥total → 単価=total÷qty
         const mA = L.match(/x\s*(\d+)\s*[¥￥]\s*(\d+)/);
         if (mA) {
             const qty = parseInt(mA[1]), total = parseInt(mA[2]);
@@ -870,7 +899,7 @@ function parseReceiptText(rawText) {
             }
         }
 
-        // パターンB: "qty×price" (e.g. "3×158" = 個数×単価)
+        // パターンB: qty×price（例: "3×158"）
         const mB = L.match(/(\d+)\s*x\s*(\d+)/);
         if (mB) {
             const qty = parseInt(mB[1]), price = parseInt(mB[2]);
@@ -879,7 +908,7 @@ function parseReceiptText(rawText) {
             }
         }
 
-        // パターンC: "@price×qty" or "@price qty個"
+        // パターンC: @price×qty or @price qty個
         const mC1 = L.match(/@(\d+)\s*x\s*(\d+)/);
         if (mC1) {
             const price = parseInt(mC1[1]), qty = parseInt(mC1[2]);
@@ -895,7 +924,7 @@ function parseReceiptText(rawText) {
             }
         }
 
-        // パターンD: "qty個 @price"
+        // パターンD: qty個 @price
         const mD = L.match(/(\d+)\s*(?:個|点|本|枚|袋)\s*@(\d+)/);
         if (mD) {
             const qty = parseInt(mD[1]), price = parseInt(mD[2]);
@@ -904,8 +933,7 @@ function parseReceiptText(rawText) {
             }
         }
 
-        // パターンE: 単品 — "name ¥price" or "name  price"（行末の数字）
-        // ¥マーク付き優先
+        // パターンE: 単品 — ¥price または行末の数字
         const mYen = L.match(/[¥￥]\s*(\d+)\s*$/);
         if (mYen) {
             const price = parseInt(mYen[1]);
@@ -913,7 +941,7 @@ function parseReceiptText(rawText) {
                 items.push({ name: '', qty: 1, price, category: 'other' }); continue;
             }
         }
-        // ¥なし・行末の2〜6桁（×や@の直後の数字は除外）
+        // ¥なし・行末の2〜6桁（×直後・@直後の数字は除外）
         const mTrail = L.match(/(?<![x@\d])(\d{2,6})\s*$/);
         if (mTrail) {
             const price = parseInt(mTrail[1]);
