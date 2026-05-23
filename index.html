@@ -531,45 +531,81 @@ function handleFileSelect(event) {
 
 function processAndPreview(srcCanvas) {
     const preview = document.getElementById('previewCanvas');
-    preview.width  = srcCanvas.width;
-    preview.height = srcCanvas.height;
+
+    // ① 解像度確保: 1800px未満なら拡大、3000px超なら縮小
+    const MIN_W = 1800, MAX_W = 3000;
+    let scale = 1;
+    if (srcCanvas.width < MIN_W) scale = MIN_W / srcCanvas.width;
+    else if (srcCanvas.width > MAX_W) scale = MAX_W / srcCanvas.width;
+    preview.width  = Math.round(srcCanvas.width  * scale);
+    preview.height = Math.round(srcCanvas.height * scale);
+
     const ctx = preview.getContext('2d');
-    ctx.drawImage(srcCanvas, 0, 0);
-    const imgData = ctx.getImageData(0, 0, preview.width, preview.height);
-    const data = imgData.data;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(srcCanvas, 0, 0, preview.width, preview.height);
 
-    // グレースケール変換
-    for (let i = 0; i < data.length; i += 4) {
-        const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-        data[i] = data[i+1] = data[i+2] = gray;
-    }
+    const W = preview.width, H = preview.height, N = W * H;
+    const imgData = ctx.getImageData(0, 0, W, H);
+    const d = imgData.data;
 
-    // コントラスト自動補正
-    let min = 255, max = 0;
-    for (let i = 0; i < data.length; i += 4) {
-        if (data[i] < min) min = data[i];
-        if (data[i] > max) max = data[i];
-    }
-    const range = max - min || 1;
-    for (let i = 0; i < data.length; i += 4) {
-        const v = Math.round(((data[i] - min) / range) * 255);
-        data[i] = data[i+1] = data[i+2] = v;
+    // ② グレースケール変換
+    for (let i = 0; i < N; i++) {
+        const v = 0.299*d[i*4] + 0.587*d[i*4+1] + 0.114*d[i*4+2];
+        d[i*4] = d[i*4+1] = d[i*4+2] = v;
+        d[i*4+3] = 255;
     }
 
-    // シャープネス強化
-    const sharp = new Uint8ClampedArray(data.length);
-    const w = preview.width;
-    for (let y = 1; y < preview.height - 1; y++) {
-        for (let x = 1; x < w - 1; x++) {
-            const idx = (y * w + x) * 4;
-            const c = data[idx];
-            const neighbors = (data[idx - 4] + data[idx + 4] + data[idx - w*4] + data[idx + w*4]) / 4;
-            const val = Math.min(255, Math.max(0, c + 1.2 * (c - neighbors)));
-            sharp[idx] = sharp[idx+1] = sharp[idx+2] = val;
-            sharp[idx+3] = 255;
-        }
+    // ③ パーセンタイルベース コントラスト正規化（外れ値に強い）
+    const hist = new Int32Array(256);
+    for (let i = 0; i < N; i++) hist[Math.round(d[i*4])]++;
+    let cum = 0, lo = 0, hi = 255;
+    const p02 = N * 0.02, p98 = N * 0.98;
+    for (let v = 0; v < 256; v++) {
+        cum += hist[v];
+        if (cum <= p02) lo = v;
+        if (cum <= p98) hi = v;
     }
-    for (let i = 0; i < data.length; i++) data[i] = sharp[i] || data[i];
+    const span = hi - lo || 1;
+    for (let i = 0; i < N; i++) {
+        const v = Math.max(0, Math.min(255, Math.round(((d[i*4] - lo) / span) * 255)));
+        d[i*4] = d[i*4+1] = d[i*4+2] = v;
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    // ④ ブラー（GPUで高速処理）→ アンシャープマスクのベースに使用
+    const blurCanvas = document.createElement('canvas');
+    blurCanvas.width = W; blurCanvas.height = H;
+    const bCtx = blurCanvas.getContext('2d');
+    bCtx.filter = 'blur(1px)';
+    bCtx.drawImage(preview, 0, 0);
+    const bd = bCtx.getImageData(0, 0, W, H).data;
+
+    // ⑤ 強アンシャープマスク（係数2.5）でテキスト輪郭を強調
+    for (let i = 0; i < N; i++) {
+        const sharpened = d[i*4] + 2.5 * (d[i*4] - bd[i*4]);
+        const v = Math.max(0, Math.min(255, Math.round(sharpened)));
+        d[i*4] = d[i*4+1] = d[i*4+2] = v;
+    }
+
+    // ⑥ Otsu二値化: 白黒のはっきりした画像でOCR精度を最大化
+    const hist2 = new Int32Array(256);
+    for (let i = 0; i < N; i++) hist2[Math.round(d[i*4])]++;
+    let sumT = 0;
+    for (let v = 0; v < 256; v++) sumT += v * hist2[v];
+    let sumB2 = 0, wB2 = 0, maxVar = 0, otsu = 128;
+    for (let v = 0; v < 256; v++) {
+        wB2 += hist2[v]; if (!wB2) continue;
+        const wF = N - wB2; if (!wF) break;
+        sumB2 += v * hist2[v];
+        const mB = sumB2 / wB2, mF = (sumT - sumB2) / wF;
+        const variance = wB2 * wF * (mB - mF) ** 2;
+        if (variance > maxVar) { maxVar = variance; otsu = v; }
+    }
+    for (let i = 0; i < N; i++) {
+        const v = d[i*4] < otsu ? 0 : 255;
+        d[i*4] = d[i*4+1] = d[i*4+2] = v;
+    }
     ctx.putImageData(imgData, 0, 0);
 
     document.getElementById('camera-idle').classList.add('hidden');
@@ -723,6 +759,8 @@ async function runOCR(canvasOrBlob) {
                 }
             },
             tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+            preserve_interword_spaces: '1',
+            tessedit_do_invert: '0',
         });
 
         loadingEl.classList.add('hidden');
@@ -752,10 +790,8 @@ async function runOCR(canvasOrBlob) {
 
 function fixOcrErrors(str) {
     return str
-        .replace(/[oO０Ｏ]/g, '0')
+        .replace(/[oOＯ０]/g, '0')
         .replace(/[lIｌＩ]/g, '1')
-        .replace(/[Ｓs]/g, '5')
-        .replace(/[Ｂb]/g, '8')
         .replace(/[，、,]/g, '')
         .replace(/[¥￥]/g, '');
 }
@@ -790,20 +826,23 @@ function parseReceiptText(rawText) {
 
     // --- 合計金額抽出ヘルパー ---
 
-    // 千の位区切り（カンマ・ピリオド）を正規化して数字列を結合
+    // 千の位区切り（カンマ・スペース・ピリオド）を正規化して数字を結合
     function normNum(s) {
         return s
-            .replace(/(\d)\s*[,，]\s*(\d{3})/g, '$1$2')   // 1,234 → 1234
-            .replace(/(\d)\s*\.\s*(\d{3})(?!\d)/g, '$1$2') // 1.234 → 1234（ピリオドが千区切りの場合）
+            .replace(/(\d)\s*[,，]\s*(\d{3})/g, '$1$2')    // 1,234 → 1234
+            .replace(/(\d)\s*\.\s*(\d{3})(?!\d)/g, '$1$2') // 1.234 → 1234（ピリオドが千区切り）
+            .replace(/(\d)\s+(\d{3})(?!\d)/g, '$1$2')      // 1 234 → 1234（スペース区切り）
             .replace(/[,，]/g, '');
     }
 
-    // 文字列から金額候補（minV〜maxV）を抽出
+    // 文字列から金額候補（minV〜maxV）を抽出（OCR誤読文字を補正）
     function extractAmounts(s, minV, maxV) {
         const cleaned = normNum(s)
-            .replace(/[¥￥円]/g, ' ')  // ¥・円を空白に変換して数字を分離
-            .replace(/[oＯ]/g, '0')    // OCR誤読補正
-            .replace(/[lＩ]/g, '1');
+            .replace(/[¥￥円]/g, ' ')   // ¥・円を空白に変換して数字を分離
+            .replace(/[oOＯ]/g, '0')   // o/O → 0
+            .replace(/[lIｌＩ]/g, '1') // l/I → 1
+            .replace(/[Ｄ]/g, '0')     // 全角D → 0（稀なOCR誤読）
+            .replace(/[Ｚ]/g, '2');    // 全角Z → 2（稀なOCR誤読）
         return (cleaned.match(/\d+/g) || []).map(Number).filter(v => v >= minV && v <= maxV);
     }
 
