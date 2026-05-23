@@ -532,8 +532,8 @@ function handleFileSelect(event) {
 function processAndPreview(srcCanvas) {
     const preview = document.getElementById('previewCanvas');
 
-    // ① 解像度確保: 1800px未満なら拡大、3000px超なら縮小
-    const MIN_W = 1800, MAX_W = 3000;
+    // ① 解像度調整: 1000〜1600px（速度優先、OCR精度は十分）
+    const MIN_W = 1000, MAX_W = 1600;
     let scale = 1;
     if (srcCanvas.width < MIN_W) scale = MIN_W / srcCanvas.width;
     else if (srcCanvas.width > MAX_W) scale = MAX_W / srcCanvas.width;
@@ -555,56 +555,37 @@ function processAndPreview(srcCanvas) {
         d[i*4] = d[i*4+1] = d[i*4+2] = v;
         d[i*4+3] = 255;
     }
-
-    // ③ パーセンタイルベース コントラスト正規化（外れ値に強い）
-    const hist = new Int32Array(256);
-    for (let i = 0; i < N; i++) hist[Math.round(d[i*4])]++;
-    let cum = 0, lo = 0, hi = 255;
-    const p02 = N * 0.02, p98 = N * 0.98;
-    for (let v = 0; v < 256; v++) {
-        cum += hist[v];
-        if (cum <= p02) lo = v;
-        if (cum <= p98) hi = v;
-    }
-    const span = hi - lo || 1;
-    for (let i = 0; i < N; i++) {
-        const v = Math.max(0, Math.min(255, Math.round(((d[i*4] - lo) / span) * 255)));
-        d[i*4] = d[i*4+1] = d[i*4+2] = v;
-    }
     ctx.putImageData(imgData, 0, 0);
 
-    // ④ ブラー（GPUで高速処理）→ アンシャープマスクのベースに使用
-    const blurCanvas = document.createElement('canvas');
-    blurCanvas.width = W; blurCanvas.height = H;
-    const bCtx = blurCanvas.getContext('2d');
-    bCtx.filter = 'blur(1px)';
-    bCtx.drawImage(preview, 0, 0);
-    const bd = bCtx.getImageData(0, 0, W, H).data;
+    // ③ 局所背景推定: 大きなブラー（影や照明ムラを捉える）
+    //    ピクセルをグローバル閾値でなく「局所背景との比較」で判定するため
+    const bgPx = Math.max(20, Math.round(W / 40)); // 画像幅の1/40 px のブラー半径
+    const bgC  = document.createElement('canvas');
+    bgC.width = W; bgC.height = H;
+    const bgX  = bgC.getContext('2d');
+    bgX.filter = `blur(${bgPx}px)`;
+    bgX.drawImage(preview, 0, 0);
+    const bg = bgX.getImageData(0, 0, W, H).data;
 
-    // ⑤ 強アンシャープマスク（係数2.5）でテキスト輪郭を強調
-    for (let i = 0; i < N; i++) {
-        const sharpened = d[i*4] + 2.5 * (d[i*4] - bd[i*4]);
-        const v = Math.max(0, Math.min(255, Math.round(sharpened)));
-        d[i*4] = d[i*4+1] = d[i*4+2] = v;
-    }
+    // ④ ノイズ除去用の小ブラー（アンシャープマスクのベース）
+    const nbC  = document.createElement('canvas');
+    nbC.width = W; nbC.height = H;
+    const nbX  = nbC.getContext('2d');
+    nbX.filter = 'blur(1px)';
+    nbX.drawImage(preview, 0, 0);
+    const nb = nbX.getImageData(0, 0, W, H).data;
 
-    // ⑥ Otsu二値化: 白黒のはっきりした画像でOCR精度を最大化
-    const hist2 = new Int32Array(256);
-    for (let i = 0; i < N; i++) hist2[Math.round(d[i*4])]++;
-    let sumT = 0;
-    for (let v = 0; v < 256; v++) sumT += v * hist2[v];
-    let sumB2 = 0, wB2 = 0, maxVar = 0, otsu = 128;
-    for (let v = 0; v < 256; v++) {
-        wB2 += hist2[v]; if (!wB2) continue;
-        const wF = N - wB2; if (!wF) break;
-        sumB2 += v * hist2[v];
-        const mB = sumB2 / wB2, mF = (sumT - sumB2) / wF;
-        const variance = wB2 * wF * (mB - mF) ** 2;
-        if (variance > maxVar) { maxVar = variance; otsu = v; }
-    }
+    // ⑤ 局所適応二値化 + アンシャープマスク
+    //    threshold = localBg × 0.85
+    //    → 影の中でもローカル背景に対して15%以上暗ければ「文字（黒）」と判定
+    //    → Otsuのようにグローバル閾値で影が全部黒に潰れる問題を防ぐ
     for (let i = 0; i < N; i++) {
-        const v = d[i*4] < otsu ? 0 : 255;
-        d[i*4] = d[i*4+1] = d[i*4+2] = v;
+        const sharpened = Math.max(0, Math.min(255, d[i*4] + 2.0 * (d[i*4] - nb[i*4])));
+        const localBg   = bg[i*4];
+        // 背景が非常に暗い場合は絶対閾値も併用（完全な影を救済）
+        const threshold = Math.max(localBg * 0.85, 30);
+        d[i*4] = d[i*4+1] = d[i*4+2] = sharpened < threshold ? 0 : 255;
+        d[i*4+3] = 255;
     }
     ctx.putImageData(imgData, 0, 0);
 
