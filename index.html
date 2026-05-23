@@ -602,10 +602,11 @@ async function runGeminiAnalysis(canvas) {
     progressEl.textContent = '商品内訳を読み取っています';
 
     try {
-        const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+        const base64 = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
         const apiKey = getGeminiApiKey();
 
-        const prompt = `このレシート画像を解析して、以下のJSON形式のみで返答してください（説明文は不要）:
+        const prompt = `このレシート・領収書の画像を詳細に解析してください。
+以下のJSON形式のみで返答してください（説明文・コメント不要）:
 {
   "date": "YYYY-MM-DD形式の購入日（不明なら今日の日付）",
   "store": "店名（読み取れない場合は空文字）",
@@ -614,7 +615,15 @@ async function runGeminiAnalysis(canvas) {
     {"name": "商品名", "qty": 数量の数値, "price": 単価の数値}
   ]
 }
-注意: 数量不明は1。単価はその商品行の金額÷数量。割引・クーポンは除外。`;
+
+【商品行の読み取りルール】
+- 「コミック　¥770」「商品名 ¥価格」のように商品名とスペース・タブの後に¥価格が続く行はすべて items に含める
+- 「商品名×3　¥2310」のように数量がある場合: qty=3, price=770（行の金額÷数量）
+- 「商品名　¥770」のように数量がない場合: qty=1, price=770
+- ¥・円・税込・本体価格など様々な表記の価格をすべて認識する
+- 価格は行末・行中どこにあってもよい（右端揃えが多い）
+- 小計・合計・内税・外税・値引・割引・ポイント・消費税の行は items に含めない
+- 商品名は前後の空白・記号を除去してそのまま使う`;
 
         const res = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
