@@ -184,7 +184,11 @@
                     </div>
                     <button id="saveBtn" onclick="saveEntry()"
                         class="w-full bg-teal-600 text-white p-3.5 rounded-xl font-bold text-base shadow-md active:scale-95 transition">
-                        💾 家計簿に記録する
+                        💾 まとめて1件で記録する
+                    </button>
+                    <button id="splitSaveBtn" onclick="splitSaveEntries()"
+                        class="hidden w-full bg-orange-500 text-white p-3.5 rounded-xl font-bold text-base shadow-md active:scale-95 transition">
+                        📋 商品ごとに分けて記録する
                     </button>
                 </div>
             </div>
@@ -628,14 +632,14 @@ clothes=洋服・靴・バッグ・アクセサリーなど衣服
 other=上記いずれにも当てはまらないもの
 
 【読み取りルール（厳守）】
-1. 「商品名　¥770」「コミック ¥770」のように商品名+スペース/タブ+金額の行はすべて items に含める
-2. 「商品名×3 ¥2310」→ qty=3, price=770（行の金額÷数量で単価を計算）
-3. 数量の記載がない行 → qty=1, price=その行の金額
-4. ¥・円・(税抜)・(税込)など様々な価格表記に対応する
-5. 小計・合計・税・値引・割引・ポイント・お釣りの行は items に含めない
-6. 商品名の先頭にある番号・記号（例：「1.」「*」「-」）は除去する
-7. 読みづらい文字は前後の文脈から推測して正確に読む
-8. 価格が右端に揃えて印字されている場合でも正確に対応する商品名と紐付ける`;
+1. 価格は必ず¥マーク（または円表記）が付いている数値のみを使う。¥マークのない数字（商品コード・JANコード・バーコード・会員番号・日付・レシート番号など）は絶対に price にしない
+2. 「コミック　¥770」「商品名 ¥770」のように商品名の後ろに¥価格が続く行をすべて items に含める
+3. 「商品名×3 ¥2310」→ qty=3, price=770（¥の後ろの金額÷数量で単価を計算）
+4. 数量の記載がない場合 → qty=1, price=¥直後の金額
+5. ¥・円・(税抜)・(税込)など価格表記のバリエーションに対応する
+6. 小計・合計・税・値引・割引・ポイント・お釣りの行は items に含めない
+7. 商品名の先頭の番号・記号（例：「1.」「*」「-」）は除去する
+8. 価格が行の右端に揃えて印字されている場合でも、¥マークを手がかりに正確に商品名と紐付ける`;
 
         const res = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
@@ -729,7 +733,7 @@ async function runOCR(canvasOrBlob) {
 
         document.getElementById('inputDate').value   = date;
         document.getElementById('inputAmount').value = amount || '';
-        document.getElementById('inputMemo').value   = memo;
+        // メモは自動入力しない
         document.getElementById('form-title-icon').textContent = '✅';
         document.getElementById('form-title-text').textContent = '読み取り完了！内容を確認してください';
 
@@ -835,6 +839,8 @@ function toggleItemsSection() {
 function clearItems() {
     currentItems = [];
     showItemsSection(false);
+    const splitBtn = document.getElementById('splitSaveBtn');
+    if (splitBtn) splitBtn.classList.add('hidden');
 }
 
 function addItem() {
@@ -898,6 +904,45 @@ function calcItemsTotal() {
     } else {
         noteEl.textContent = '';
     }
+    // 2件以上の有効な商品があるときだけ「分けて記録」ボタンを表示
+    const validCount = currentItems.filter(i => i.price > 0).length;
+    const splitBtn = document.getElementById('splitSaveBtn');
+    if (splitBtn) splitBtn.classList.toggle('hidden', validCount < 2);
+}
+
+function splitSaveEntries() {
+    const date = document.getElementById('inputDate').value;
+    if (!date) { showToast('日付を入力してください'); return; }
+
+    const validItems = currentItems.filter(i => i.price > 0);
+    if (validItems.length < 2) { showToast('2品目以上を入力してください'); return; }
+
+    validItems.forEach((item, i) => {
+        db.push({
+            id: Date.now() + i,
+            date,
+            amount: item.qty * item.price,
+            category: item.category || selectedCategory,
+            memo: item.name || ''
+        });
+    });
+
+    localStorage.setItem('kakeibo_v2', JSON.stringify(db));
+    updateMonthFilters();
+    showToast(`✅ ${validItems.length}件を個別に記録しました！`);
+
+    setTodayDate();
+    document.getElementById('inputAmount').value = '';
+    document.getElementById('inputMemo').value = '';
+    selectCategory('other');
+    clearItems();
+    retakePhoto();
+    document.getElementById('camera-idle').classList.remove('hidden');
+    document.getElementById('imageInput').value = '';
+    document.getElementById('form-title-icon').textContent = '✏️';
+    document.getElementById('form-title-text').textContent = '読み取り結果を確認・修正';
+
+    setTimeout(() => switchTab('list'), 800);
 }
 
 // ===== 商品内訳管理（編集モーダル用） =====
