@@ -602,9 +602,8 @@ function processAndPreview(srcCanvas) {
     }
     ctx.putImageData(imgData, 0, 0);
 
-    // ③ 局所背景推定: 大きなブラー（影や照明ムラを捉える）
-    //    ピクセルをグローバル閾値でなく「局所背景との比較」で判定するため
-    const bgPx = Math.max(20, Math.round(W / 40)); // 画像幅の1/40 px のブラー半径
+    // ③ 局所背景推定（大ブラー）: 影・照明ムラをW/35スケールで捉える
+    const bgPx = Math.max(30, Math.round(W / 35));
     const bgC  = document.createElement('canvas');
     bgC.width = W; bgC.height = H;
     const bgX  = bgC.getContext('2d');
@@ -612,27 +611,35 @@ function processAndPreview(srcCanvas) {
     bgX.drawImage(preview, 0, 0);
     const bg = bgX.getImageData(0, 0, W, H).data;
 
-    // ④ ノイズ除去用の小ブラー（アンシャープマスクのベース）
-    const nbC  = document.createElement('canvas');
-    nbC.width = W; nbC.height = H;
-    const nbX  = nbC.getContext('2d');
-    nbX.filter = 'blur(1px)';
-    nbX.drawImage(preview, 0, 0);
-    const nb = nbX.getImageData(0, 0, W, H).data;
+    // ④ 2段アンシャープマスク用ブラー（細かい筆跡 + 中間スケール）
+    const nb1C = document.createElement('canvas');
+    nb1C.width = W; nb1C.height = H;
+    const nb1X = nb1C.getContext('2d');
+    nb1X.filter = 'blur(1px)';
+    nb1X.drawImage(preview, 0, 0);
+    const nb1 = nb1X.getImageData(0, 0, W, H).data;
 
-    // ⑤ 局所コントラスト強調（グレースケール保持・メリハリ強め）
-    //    局所背景を245相当に正規化し、S字カーブで暗部↓明部↑に強調
+    const nb2C = document.createElement('canvas');
+    nb2C.width = W; nb2C.height = H;
+    const nb2X = nb2C.getContext('2d');
+    nb2X.filter = 'blur(2.5px)';
+    nb2X.drawImage(preview, 0, 0);
+    const nb2 = nb2X.getImageData(0, 0, W, H).data;
+
+    // ⑤ 局所コントラスト強調 + 2段シャープ + S字カーブ
     for (let i = 0; i < N; i++) {
-        const localBg  = Math.max(bg[i*4], 50);
-        const ratio    = Math.min(3.0, 245 / localBg);
-        const norm     = Math.min(255, d[i*4] * ratio);
-        const nbNorm   = Math.min(255, nb[i*4] * ratio);
-        const sharpened = Math.max(0, Math.min(255, norm + 2.0 * (norm - nbNorm)));
-        // S字カーブ: 暗い部分をより黒く、明るい部分をより白く
+        const localBg = Math.max(bg[i*4], 45);
+        const ratio   = Math.min(3.2, 248 / localBg); // 背景を248相当に正規化
+        const norm    = Math.min(255, d[i*4] * ratio);
+        const n1      = Math.min(255, nb1[i*4] * ratio);
+        const n2      = Math.min(255, nb2[i*4] * ratio);
+        // 2段アンシャープマスク: 細部(1px) + 中域(2.5px)
+        const sharpened = Math.max(0, Math.min(255, norm + 1.4 * (norm - n1) + 0.7 * (norm - n2)));
+        // S字カーブ(指数2.0): 極端な2値化にならない範囲でメリハリを強調
         const t = sharpened / 255;
         const curved = t < 0.5
-            ? 255 * 0.5 * Math.pow(2 * t, 1.6)
-            : 255 * (1 - 0.5 * Math.pow(2 * (1 - t), 1.6));
+            ? 255 * 0.5 * Math.pow(2 * t, 2.0)
+            : 255 * (1 - 0.5 * Math.pow(2 * (1 - t), 2.0));
         d[i*4] = d[i*4+1] = d[i*4+2] = Math.round(curved);
         d[i*4+3] = 255;
     }
@@ -737,25 +744,31 @@ food=食費, daily=日用品, traffic=交通, health=医療, utility=光熱費, 
 
         if (result.date) document.getElementById('inputDate').value = result.date;
         if (result.total > 0) document.getElementById('inputAmount').value = result.total;
-        // メモは自動入力しない（ユーザーが手動で入力）
-
-        // Geminiが返したprimaryCategoryをメインカテゴリに反映
         if (result.primaryCategory) selectCategory(normCat(result.primaryCategory));
 
+        document.getElementById('form-title-icon').textContent = '✅';
+
         if (Array.isArray(result.items) && result.items.length > 0) {
-            currentItems = result.items.map(item => ({
-                name: String(item.name || ''),
-                qty: Math.max(1, Number(item.qty) || 1),
-                price: Math.max(0, Number(item.price) || 0),
+            const parsedItems = result.items.map(item => ({
+                name:     String(item.name || ''),
+                qty:      Math.max(1, Number(item.qty) || 1),
+                price:    Number(item.price) || 0, // マイナス価格（割引）を許可
                 category: normCat(item.category || result.primaryCategory || 'other')
             }));
-            showItemsSection(true);
-            renderItems();
-            document.getElementById('form-title-icon').textContent = '✅';
-            document.getElementById('form-title-text').textContent = `AI解析完了！${currentItems.length}品目を読み取りました`;
-            showToast(`${currentItems.length}品目の内訳を読み取りました`);
+            const itemsSum = parsedItems.reduce((s, i) => s + i.qty * i.price, 0);
+            if (result.total <= 0 || itemsSum === parseInt(result.total)) {
+                // 合計未検出 or 内訳一致 → 内訳を表示
+                currentItems = parsedItems;
+                showItemsSection(true);
+                renderItems();
+                document.getElementById('form-title-text').textContent = `AI解析完了！${currentItems.length}品目を読み取りました`;
+                showToast(`${currentItems.length}品目の内訳を読み取りました`);
+            } else {
+                // 不一致 → 内訳クリア（合計金額はそのまま）
+                document.getElementById('form-title-text').textContent = '読み取り完了！内容を確認してください';
+                if (result.total > 0) showToast(`¥${parseInt(result.total).toLocaleString()} を読み取りました（内訳不一致のためクリア）`);
+            }
         } else {
-            document.getElementById('form-title-icon').textContent = '✅';
             document.getElementById('form-title-text').textContent = '読み取り完了！内容を確認してください';
             if (result.total > 0) showToast(`¥${parseInt(result.total).toLocaleString()} を読み取りました`);
             else showToast('金額が読み取れませんでした。手動で入力してください。');
@@ -780,14 +793,21 @@ async function runOCR(canvasOrBlob) {
 
     try {
         // プレビューより小さいキャンバスをOCRに渡して高速化
+        // OCR用に1500px幅に調整（小さい画像は拡大、大きすぎる場合は縮小）
         let ocrTarget = canvasOrBlob;
-        if (canvasOrBlob instanceof HTMLCanvasElement && canvasOrBlob.width > 1300) {
-            const s = 1200 / canvasOrBlob.width;
-            const oc = document.createElement('canvas');
-            oc.width  = Math.round(canvasOrBlob.width  * s);
-            oc.height = Math.round(canvasOrBlob.height * s);
-            oc.getContext('2d').drawImage(canvasOrBlob, 0, 0, oc.width, oc.height);
-            ocrTarget = oc;
+        if (canvasOrBlob instanceof HTMLCanvasElement) {
+            const TARGET_W = 1500;
+            if (canvasOrBlob.width !== TARGET_W) {
+                const s = TARGET_W / canvasOrBlob.width;
+                const oc = document.createElement('canvas');
+                oc.width  = TARGET_W;
+                oc.height = Math.round(canvasOrBlob.height * s);
+                const octx = oc.getContext('2d');
+                octx.imageSmoothingEnabled = true;
+                octx.imageSmoothingQuality = 'high';
+                octx.drawImage(canvasOrBlob, 0, 0, oc.width, oc.height);
+                ocrTarget = oc;
+            }
         }
 
         const { data: { text } } = await Tesseract.recognize(ocrTarget, 'jpn+eng', {
@@ -799,35 +819,34 @@ async function runOCR(canvasOrBlob) {
                     progressEl.textContent = `${Math.floor(m.progress * 100)}% 完了`;
                 }
             },
-            tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+            tessedit_pageseg_mode: Tesseract.PSM.SINGLE_COLUMN, // レシートは縦1列が基本
             preserve_interword_spaces: '1',
             tessedit_do_invert: '0',
+            user_defined_dpi: '300',
         });
 
         loadingEl.classList.add('hidden');
         const { date, amount, memo, items } = parseReceiptText(text);
 
-        document.getElementById('inputDate').value = date;
+        document.getElementById('inputDate').value   = date;
+        document.getElementById('inputAmount').value = amount || '';
         document.getElementById('form-title-icon').textContent = '✅';
         document.getElementById('form-title-text').textContent = '読み取り完了！内容を確認してください';
 
         if (items && items.length > 0) {
-            currentItems = items;
-            showItemsSection(true);
-            renderItems();
             const itemsSum = items.reduce((s, i) => s + i.qty * i.price, 0);
-            if (amount && itemsSum === parseInt(amount)) {
-                // 内訳合計と一致 → 金額欄にセット
-                document.getElementById('inputAmount').value = amount;
-                showToast(`¥${parseInt(amount).toLocaleString()} を読み取りました`);
+            if (!amount || itemsSum === parseInt(amount)) {
+                // 合計未検出 or 内訳合計と一致 → 内訳を表示
+                currentItems = items;
+                showItemsSection(true);
+                renderItems();
+                calcItemsTotal();
+                showToast(amount ? `¥${parseInt(amount).toLocaleString()} を読み取りました` : '金額が読み取れませんでした。手動で入力してください。');
             } else {
-                // 不一致 → 金額欄を空にして手動入力を促す
-                document.getElementById('inputAmount').value = '';
-                showToast('内訳合計と金額が不一致です。金額を確認してください。');
+                // 不一致 → 内訳はクリア（合計金額はそのまま）
+                showToast(`¥${parseInt(amount).toLocaleString()} を読み取りました（内訳不一致のためクリア）`);
             }
-            calcItemsTotal();
         } else {
-            document.getElementById('inputAmount').value = amount || '';
             if (amount) showToast(`¥${parseInt(amount).toLocaleString()} を読み取りました`);
             else        showToast('金額が読み取れませんでした。手動で入力してください。');
         }
