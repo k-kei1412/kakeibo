@@ -807,9 +807,7 @@ async function runOCR(canvasOrBlob) {
         loadingEl.classList.add('hidden');
         const { date, amount, memo, items } = parseReceiptText(text);
 
-        document.getElementById('inputDate').value   = date;
-        document.getElementById('inputAmount').value = amount || '';
-        // メモは自動入力しない
+        document.getElementById('inputDate').value = date;
         document.getElementById('form-title-icon').textContent = '✅';
         document.getElementById('form-title-text').textContent = '読み取り完了！内容を確認してください';
 
@@ -817,11 +815,22 @@ async function runOCR(canvasOrBlob) {
             currentItems = items;
             showItemsSection(true);
             renderItems();
+            const itemsSum = items.reduce((s, i) => s + i.qty * i.price, 0);
+            if (amount && itemsSum === parseInt(amount)) {
+                // 内訳合計と一致 → 金額欄にセット
+                document.getElementById('inputAmount').value = amount;
+                showToast(`¥${parseInt(amount).toLocaleString()} を読み取りました`);
+            } else {
+                // 不一致 → 金額欄を空にして手動入力を促す
+                document.getElementById('inputAmount').value = '';
+                showToast('内訳合計と金額が不一致です。金額を確認してください。');
+            }
             calcItemsTotal();
+        } else {
+            document.getElementById('inputAmount').value = amount || '';
+            if (amount) showToast(`¥${parseInt(amount).toLocaleString()} を読み取りました`);
+            else        showToast('金額が読み取れませんでした。手動で入力してください。');
         }
-
-        if (amount) showToast(`¥${parseInt(amount).toLocaleString()} を読み取りました`);
-        else        showToast('金額が読み取れませんでした。手動で入力してください。');
     } catch (err) {
         loadingEl.classList.add('hidden');
         showToast('読み取りに失敗しました。手動で入力してください。');
@@ -894,28 +903,29 @@ function parseReceiptText(rawText) {
         return (merged.match(/\d+/g) || []).map(Number).filter(v => v >= minV && v <= maxV);
     }
 
-    // キーワードの右側テキストから金額を取得（最も精度が高い）
+    // キーワードの右側テキストから最初の有効な金額を取得
+    // 割引後の合計は最大値とは限らないため、右側の最初の数字を採用する
     function amountAfterKw(line, kwRe, minV, maxV) {
         const m = line.match(kwRe);
         if (!m) return 0;
         const after = line.slice(m.index + m[0].length);
         const nums = extractAmounts(after, minV, maxV);
-        return nums.length ? Math.max(...nums) : 0;
+        return nums.length ? nums[0] : 0; // 最初の数字（最大値でない）
     }
 
     // --- 合計金額抽出 ---
     let amount = 0;
-    const highKw = /税込\s*合計|税\s*込|ご\s*請求\s*金額|お\s*支払[いい]?\s*金額|お\s*支払[いい]?\s*合計|お\s*支払[いい]?|合計\s*金額|請求\s*金額/;
-    const midKw  = /合\s*計|TOTAL|total|AMOUNT/;
+    const highKw = /税込\s*合計|ご\s*請求\s*金額|お\s*支払[いい]?\s*金額|お\s*支払[いい]?\s*合計|お\s*支払[いい]?|合計\s*金額|請求\s*金額/;
+    const midKw  = /税\s*込|合\s*計|TOTAL|total|AMOUNT/;
     const exKw   = /税抜|内税|外税|値引|割引|ポイント|お釣|預かり|小\s*計/;
-    const allKw  = /税込\s*合計|税\s*込|ご\s*請求\s*金額|お\s*支払[いい]?\s*金額|お\s*支払[いい]?\s*合計|お\s*支払[いい]?|合計\s*金額|請求\s*金額|合\s*計|TOTAL|total|AMOUNT/;
+    const allKw  = /税込\s*合計|ご\s*請求\s*金額|お\s*支払[いい]?\s*金額|お\s*支払[いい]?\s*合計|お\s*支払[いい]?|合計\s*金額|請求\s*金額|税\s*込|合\s*計|TOTAL|total|AMOUNT/;
 
     function tryKw(kw) {
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             if (!kw.test(line) || exKw.test(line)) continue;
 
-            // ① キーワードの右側の数字を優先取得
+            // ① キーワードの右側の最初の数字を優先取得
             let v = amountAfterKw(line, allKw, 100, 999999);
 
             // ② 同じ行に数字がなければ次の1〜2行を確認
@@ -924,11 +934,12 @@ function parseReceiptText(rawText) {
                     const next = lines[j];
                     if (exKw.test(next)) break;
                     const nums = extractAmounts(next, 100, 999999);
-                    if (nums.length) { v = Math.max(...nums); break; }
+                    if (nums.length) { v = nums[0]; break; } // 最初の数字を採用
                 }
             }
 
-            if (v > amount) amount = v;
+            // 最後にマッチした値を採用（割引後合計が下にあるため）
+            if (v > 0) amount = v;
         }
     }
     tryKw(highKw);
@@ -961,6 +972,17 @@ function parseReceiptText(rawText) {
     for (const line of lines) {
         // 小計・合計行が来たら商品行の走査を終了
         if (stopKw.test(line)) break;
+
+        // --- 先頭がマイナス記号の行（-¥500、△¥200、▲¥300 など） ---
+        const negLine = normNum(line).replace(/[×ｘ]/g,'x').replace(/[@＠]/g,'@');
+        const mNeg = negLine.match(/^[-−△▲]\s*[¥￥]?\s*(\d+)/);
+        if (mNeg && !totalKw.test(line)) {
+            const v = parseInt(mNeg[1]);
+            if (v >= 1 && v <= 99999) {
+                items.push({ name: '値引', qty: 1, price: -v, category: 'other' });
+                continue;
+            }
+        }
 
         // --- 割引・値引き → マイナス ---
         if (discountKw.test(line)) {
