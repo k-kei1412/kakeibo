@@ -237,12 +237,56 @@
                 <p class="text-xs text-teal-300 mt-2"><span id="summaryCount">0</span>件の記録</p>
             </div>
 
+            <!-- 予算セクション -->
+            <div id="budget-section" class="hidden mb-4">
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="font-bold text-gray-700 text-sm">💰 月間予算</h3>
+                        <button onclick="openBudgetModal()" class="text-xs text-teal-600 border border-teal-200 px-2.5 py-1 rounded-lg bg-teal-50 active:bg-teal-100">✏️ 設定</button>
+                    </div>
+                    <div id="budget-content"></div>
+                </div>
+            </div>
+
             <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
                 <h3 class="font-bold text-gray-700 text-sm mb-3">カテゴリ別内訳</h3>
                 <div id="categoryBreakdown" class="space-y-3"></div>
             </div>
         </div>
 
+    </div>
+
+    <!-- ===== 予算設定モーダル ===== -->
+    <div id="budget-modal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/50" onclick="closeBudgetModal()"></div>
+        <div class="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl max-w-lg mx-auto" style="max-height:90vh;overflow-y:auto">
+            <div class="p-5">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="font-bold text-gray-800">💰 月間予算の設定</h3>
+                    <button onclick="closeBudgetModal()" class="text-gray-400 text-2xl leading-none">&times;</button>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs text-gray-500 font-bold mb-1">月間予算合計</label>
+                        <div class="flex items-center gap-2">
+                            <span class="text-gray-400 font-bold">¥</span>
+                            <input type="number" id="budgetTotalInput" inputmode="numeric" placeholder="例: 50000"
+                                oninput="updateBudgetUnallocated()"
+                                class="flex-1 p-3 border rounded-xl text-right text-xl font-bold focus:outline-none focus:ring-2 focus:ring-teal-400">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 font-bold mb-2">カテゴリ別予算（任意）</label>
+                        <div id="budget-cat-inputs" class="space-y-2"></div>
+                        <p id="budgetUnallocated" class="text-xs mt-2 text-right"></p>
+                    </div>
+                </div>
+                <div class="flex gap-3 mt-6">
+                    <button onclick="closeBudgetModal()" class="flex-1 py-3 rounded-xl border border-gray-200 text-gray-500 text-sm">キャンセル</button>
+                    <button onclick="saveBudgetFromModal()" class="flex-1 py-3 rounded-xl bg-teal-500 text-white font-bold text-sm active:bg-teal-600">💾 保存</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- ===== 編集モーダル ===== -->
@@ -730,7 +774,18 @@ async function runOCR(canvasOrBlob) {
     progressEl.textContent = '0% 完了';
 
     try {
-        const { data: { text } } = await Tesseract.recognize(canvasOrBlob, 'jpn+eng', {
+        // プレビューより小さいキャンバスをOCRに渡して高速化
+        let ocrTarget = canvasOrBlob;
+        if (canvasOrBlob instanceof HTMLCanvasElement && canvasOrBlob.width > 1300) {
+            const s = 1200 / canvasOrBlob.width;
+            const oc = document.createElement('canvas');
+            oc.width  = Math.round(canvasOrBlob.width  * s);
+            oc.height = Math.round(canvasOrBlob.height * s);
+            oc.getContext('2d').drawImage(canvasOrBlob, 0, 0, oc.width, oc.height);
+            ocrTarget = oc;
+        }
+
+        const { data: { text } } = await Tesseract.recognize(ocrTarget, 'jpn+eng', {
             logger: m => {
                 if (m.status === 'loading language traineddata') {
                     statusEl.textContent = '言語データ読込中...';
@@ -1354,14 +1409,8 @@ function confirmClear() {
 }
 
 // ===== 集計表示 =====
-function renderSummary() {
-    const filterMonth = document.getElementById('summaryMonth').value;
-    let data = filterMonth ? db.filter(d => d.date.startsWith(filterMonth)) : db;
-
-    const total = data.reduce((s, d) => s + d.amount, 0);
-    document.getElementById('summaryTotal').textContent = total.toLocaleString();
-    document.getElementById('summaryCount').textContent = data.length;
-
+function calcCategorySpending(filterMonth) {
+    const data = filterMonth ? db.filter(d => d.date.startsWith(filterMonth)) : db;
     const breakdown = {};
     CATEGORIES.forEach(c => { breakdown[c.id] = 0; });
     const validCatIds = new Set(CATEGORIES.map(c => c.id));
@@ -1376,6 +1425,16 @@ function renderSummary() {
             breakdown[cat] = (breakdown[cat] || 0) + d.amount;
         }
     });
+    return { data, breakdown };
+}
+
+function renderSummary() {
+    const filterMonth = document.getElementById('summaryMonth').value;
+    const { data, breakdown } = calcCategorySpending(filterMonth);
+
+    const total = data.reduce((s, d) => s + d.amount, 0);
+    document.getElementById('summaryTotal').textContent = total.toLocaleString();
+    document.getElementById('summaryCount').textContent = data.length;
 
     const sorted = CATEGORIES.filter(c => breakdown[c.id] > 0)
         .sort((a, b) => breakdown[b.id] - breakdown[a.id]);
@@ -1383,21 +1442,156 @@ function renderSummary() {
     const container = document.getElementById('categoryBreakdown');
     if (sorted.length === 0) {
         container.innerHTML = '<p class="text-gray-400 text-sm text-center py-4">データがありません</p>';
+    } else {
+        const max = breakdown[sorted[0].id] || 1;
+        container.innerHTML = sorted.map(cat => {
+            const pct = total > 0 ? Math.round(breakdown[cat.id] / total * 100) : 0;
+            const barW = Math.round(breakdown[cat.id] / max * 100);
+            return `
+            <div>
+                <div class="flex justify-between items-center mb-1">
+                    <span class="text-sm flex items-center gap-1.5">${cat.emoji} ${cat.label}</span>
+                    <span class="text-sm font-bold">¥${breakdown[cat.id].toLocaleString()} <span class="text-xs text-gray-400">${pct}%</span></span>
+                </div>
+                <div class="bg-gray-100 rounded-full h-2"><div class="bg-teal-500 h-2 rounded-full transition-all" style="width:${barW}%"></div></div>
+            </div>`;
+        }).join('');
+    }
+
+    renderBudget(filterMonth, breakdown);
+}
+
+// ===== 予算管理 =====
+const BUDGET_KEY = 'kakeibo_budget';
+
+function loadBudget() {
+    try { return JSON.parse(localStorage.getItem(BUDGET_KEY)) || { total: 0, categories: {} }; }
+    catch { return { total: 0, categories: {} }; }
+}
+
+function openBudgetModal() {
+    const budget = loadBudget();
+    document.getElementById('budgetTotalInput').value = budget.total || '';
+    document.getElementById('budget-cat-inputs').innerHTML = CATEGORIES.map(c => `
+        <div class="flex items-center gap-2">
+            <span class="text-sm w-20 shrink-0">${c.emoji} ${c.label}</span>
+            <span class="text-gray-400">¥</span>
+            <input type="number" id="budget-cat-${c.id}" inputmode="numeric" placeholder="未設定"
+                value="${budget.categories[c.id] || ''}"
+                oninput="updateBudgetUnallocated()"
+                class="flex-1 p-2 border rounded-lg text-right text-sm focus:outline-none focus:ring-1 focus:ring-teal-400">
+        </div>`).join('');
+    document.getElementById('budget-modal').classList.remove('hidden');
+    updateBudgetUnallocated();
+}
+
+function closeBudgetModal() {
+    document.getElementById('budget-modal').classList.add('hidden');
+}
+
+function updateBudgetUnallocated() {
+    const total = parseInt(document.getElementById('budgetTotalInput').value) || 0;
+    let allocated = 0;
+    CATEGORIES.forEach(c => {
+        const el = document.getElementById('budget-cat-' + c.id);
+        if (el) allocated += parseInt(el.value) || 0;
+    });
+    const rem = total - allocated;
+    const el = document.getElementById('budgetUnallocated');
+    if (!el) return;
+    if (total === 0) { el.textContent = ''; return; }
+    el.textContent = rem >= 0
+        ? `未振り分け: ¥${rem.toLocaleString()}`
+        : `振り分けが予算を ¥${Math.abs(rem).toLocaleString()} 超えています`;
+    el.className = `text-xs mt-2 text-right font-bold ${rem < 0 ? 'text-red-500' : 'text-gray-400'}`;
+}
+
+function saveBudgetFromModal() {
+    const total = parseInt(document.getElementById('budgetTotalInput').value) || 0;
+    const categories = {};
+    CATEGORIES.forEach(c => {
+        const v = parseInt((document.getElementById('budget-cat-' + c.id) || {}).value) || 0;
+        if (v > 0) categories[c.id] = v;
+    });
+    localStorage.setItem(BUDGET_KEY, JSON.stringify({ total, categories }));
+    closeBudgetModal();
+    renderSummary();
+    showToast('予算を保存しました');
+}
+
+function renderBudget(filterMonth, breakdown) {
+    const section = document.getElementById('budget-section');
+    if (!filterMonth) { section.classList.add('hidden'); return; }
+    section.classList.remove('hidden');
+
+    const budget = loadBudget();
+    const hasBudget = budget.total > 0 || Object.keys(budget.categories).length > 0;
+    if (!hasBudget) {
+        document.getElementById('budget-content').innerHTML =
+            '<p class="text-sm text-gray-400 text-center py-2">「✏️ 設定」から月間予算を登録できます</p>';
         return;
     }
-    const max = breakdown[sorted[0].id] || 1;
-    container.innerHTML = sorted.map(cat => {
-        const pct = total > 0 ? Math.round(breakdown[cat.id] / total * 100) : 0;
-        const barW = Math.round(breakdown[cat.id] / max * 100);
-        return `
-        <div>
-            <div class="flex justify-between items-center mb-1">
-                <span class="text-sm flex items-center gap-1.5">${cat.emoji} ${cat.label}</span>
-                <span class="text-sm font-bold">¥${breakdown[cat.id].toLocaleString()} <span class="text-xs text-gray-400">${pct}%</span></span>
+
+    const totalSpent  = CATEGORIES.reduce((s, c) => s + (breakdown[c.id] || 0), 0);
+    const totalBudget = budget.total;
+    const totalRem    = totalBudget - totalSpent;
+    const pctTotal    = totalBudget > 0 ? Math.min(100, Math.round(totalSpent / totalBudget * 100)) : 0;
+    const overTotal   = totalBudget > 0 && totalRem < 0;
+
+    let html = '';
+
+    // 全体バー
+    if (totalBudget > 0) {
+        const barCol  = overTotal ? 'bg-red-400' : pctTotal > 80 ? 'bg-yellow-400' : 'bg-teal-500';
+        const remHtml = overTotal
+            ? `<span class="text-red-500 font-bold">-¥${Math.abs(totalRem).toLocaleString()} 超過</span>`
+            : `<span class="text-teal-600 font-bold">残り ¥${totalRem.toLocaleString()}</span>`;
+        html += `
+        <div class="mb-4 pb-4 border-b border-gray-100">
+            <div class="flex justify-between text-sm mb-1">
+                <span class="text-gray-500">予算 <span class="font-bold text-gray-700">¥${totalBudget.toLocaleString()}</span></span>
+                ${remHtml}
             </div>
-            <div class="bg-gray-100 rounded-full h-2"><div class="bg-teal-500 h-2 rounded-full transition-all" style="width:${barW}%"></div></div>
+            <div class="bg-gray-100 rounded-full h-3 overflow-hidden">
+                <div class="${barCol} h-3 rounded-full transition-all" style="width:${pctTotal}%"></div>
+            </div>
+            <div class="text-right text-xs text-gray-400 mt-1">使用済み ¥${totalSpent.toLocaleString()}（${pctTotal}%）</div>
         </div>`;
-    }).join('');
+    }
+
+    // カテゴリ別
+    const rows = CATEGORIES.filter(c => (budget.categories[c.id] || 0) > 0 || (breakdown[c.id] || 0) > 0);
+    if (rows.length > 0) {
+        html += '<div class="space-y-3">';
+        rows.forEach(cat => {
+            const catBudget = budget.categories[cat.id] || 0;
+            const catSpent  = breakdown[cat.id] || 0;
+            const catRem    = catBudget - catSpent;
+            const isOver    = catBudget > 0 && catRem < 0;
+            const pctCat    = catBudget > 0 ? Math.min(100, Math.round(catSpent / catBudget * 100)) : 0;
+            const barColCat = isOver ? 'bg-red-400' : pctCat > 80 ? 'bg-yellow-400' : 'bg-teal-500';
+            const remBadge  = catBudget > 0
+                ? isOver
+                    ? `<span class="text-xs font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded-lg">-¥${Math.abs(catRem).toLocaleString()}</span>`
+                    : `<span class="text-xs text-teal-600">残¥${catRem.toLocaleString()}</span>`
+                : '';
+            html += `
+            <div class="${isOver ? 'bg-red-50 rounded-xl p-2 -mx-1' : ''}">
+                <div class="flex justify-between items-center mb-1 text-xs">
+                    <span>${cat.emoji} ${cat.label}</span>
+                    <span class="flex items-center gap-1.5">
+                        <span class="text-gray-600 font-bold">¥${catSpent.toLocaleString()}</span>
+                        ${catBudget > 0 ? `<span class="text-gray-400">/ ¥${catBudget.toLocaleString()}</span>` : ''}
+                        ${remBadge}
+                    </span>
+                </div>
+                ${catBudget > 0 ? `<div class="bg-gray-100 rounded-full h-1.5 overflow-hidden"><div class="${barColCat} h-1.5 rounded-full" style="width:${pctCat}%"></div></div>` : ''}
+            </div>`;
+        });
+        html += '</div>';
+    }
+
+    document.getElementById('budget-content').innerHTML = html;
 }
 
 // ===== CSV出力 =====
