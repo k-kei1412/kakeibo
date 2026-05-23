@@ -602,28 +602,40 @@ async function runGeminiAnalysis(canvas) {
     progressEl.textContent = '商品内訳を読み取っています';
 
     try {
-        const base64 = canvas.toDataURL('image/jpeg', 0.95).split(',')[1];
+        const base64 = canvas.toDataURL('image/jpeg', 0.97).split(',')[1];
         const apiKey = getGeminiApiKey();
 
-        const prompt = `このレシート・領収書の画像を詳細に解析してください。
-以下のJSON形式のみで返答してください（説明文・コメント不要）:
+        const prompt = `このレシート・領収書画像を精密に解析してください。
+画像内の全テキストを上から下、左から右の順で丁寧に読み取り、以下のJSON形式のみで返答してください（コメント・説明文は一切不要）:
 {
-  "date": "YYYY-MM-DD形式の購入日（不明なら今日の日付）",
+  "date": "YYYY-MM-DD形式（不明なら今日の日付）",
   "store": "店名（読み取れない場合は空文字）",
   "total": 税込合計金額の数値（不明なら0）,
+  "primaryCategory": "エントリ全体のカテゴリID（下記リストから1つ）",
   "items": [
-    {"name": "商品名", "qty": 数量の数値, "price": 単価の数値}
+    {"name": "商品名", "qty": 数量の数値, "price": 単価の数値, "category": "カテゴリID"}
   ]
 }
 
-【商品行の読み取りルール】
-- 「コミック　¥770」「商品名 ¥価格」のように商品名とスペース・タブの後に¥価格が続く行はすべて items に含める
-- 「商品名×3　¥2310」のように数量がある場合: qty=3, price=770（行の金額÷数量）
-- 「商品名　¥770」のように数量がない場合: qty=1, price=770
-- ¥・円・税込・本体価格など様々な表記の価格をすべて認識する
-- 価格は行末・行中どこにあってもよい（右端揃えが多い）
-- 小計・合計・内税・外税・値引・割引・ポイント・消費税の行は items に含めない
-- 商品名は前後の空白・記号を除去してそのまま使う`;
+【カテゴリIDリスト（必ずこの中から選ぶ）】
+food=食品・飲料・野菜・肉・魚・弁当・お菓子など食費全般
+daily=洗剤・シャンプー・ティッシュ・文房具など日用品・消耗品
+traffic=電車・バス・タクシー・駐車場・ガソリン
+health=薬・サプリ・病院・歯科など医療・健康
+utility=電気・ガス・水道・通信料など光熱費・公共料金
+enter=本・マンガ・ゲーム・映画・CD・音楽など娯楽
+clothes=洋服・靴・バッグ・アクセサリーなど衣服
+other=上記いずれにも当てはまらないもの
+
+【読み取りルール（厳守）】
+1. 「商品名　¥770」「コミック ¥770」のように商品名+スペース/タブ+金額の行はすべて items に含める
+2. 「商品名×3 ¥2310」→ qty=3, price=770（行の金額÷数量で単価を計算）
+3. 数量の記載がない行 → qty=1, price=その行の金額
+4. ¥・円・(税抜)・(税込)など様々な価格表記に対応する
+5. 小計・合計・税・値引・割引・ポイント・お釣りの行は items に含めない
+6. 商品名の先頭にある番号・記号（例：「1.」「*」「-」）は除去する
+7. 読みづらい文字は前後の文脈から推測して正確に読む
+8. 価格が右端に揃えて印字されている場合でも正確に対応する商品名と紐付ける`;
 
         const res = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
@@ -653,15 +665,22 @@ async function runGeminiAnalysis(canvas) {
         const result = JSON.parse(jsonMatch[0]);
         loadingEl.classList.add('hidden');
 
+        const validCatIds = new Set(CATEGORIES.map(c => c.id));
+        const normCat = id => validCatIds.has(id) ? id : 'other';
+
         if (result.date) document.getElementById('inputDate').value = result.date;
         if (result.total > 0) document.getElementById('inputAmount').value = result.total;
-        if (result.store) document.getElementById('inputMemo').value = result.store;
+        // メモは自動入力しない（ユーザーが手動で入力）
+
+        // Geminiが返したprimaryCategoryをメインカテゴリに反映
+        if (result.primaryCategory) selectCategory(normCat(result.primaryCategory));
 
         if (Array.isArray(result.items) && result.items.length > 0) {
             currentItems = result.items.map(item => ({
                 name: String(item.name || ''),
                 qty: Math.max(1, Number(item.qty) || 1),
-                price: Math.max(0, Number(item.price) || 0)
+                price: Math.max(0, Number(item.price) || 0),
+                category: normCat(item.category || result.primaryCategory || 'other')
             }));
             showItemsSection(true);
             renderItems();
@@ -819,7 +838,7 @@ function clearItems() {
 }
 
 function addItem() {
-    currentItems.push({ name: '', qty: 1, price: 0 });
+    currentItems.push({ name: '', qty: 1, price: 0, category: selectedCategory });
     renderItems();
 }
 
@@ -832,6 +851,13 @@ function escHtml(str) {
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function catSelectHtml(selectedId, onchangeJs) {
+    const opts = CATEGORIES.map(c =>
+        `<option value="${c.id}"${c.id === selectedId ? ' selected' : ''}>${c.emoji} ${c.label}</option>`
+    ).join('');
+    return `<select onchange="${onchangeJs}" class="flex-1 text-xs p-1.5 border rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">${opts}</select>`;
+}
+
 function renderItems() {
     const container = document.getElementById('items-list');
     if (currentItems.length === 0) {
@@ -840,19 +866,24 @@ function renderItems() {
         return;
     }
     container.innerHTML = currentItems.map((item, idx) => `
-        <div class="item-row flex items-center gap-1 bg-gray-50 rounded-xl p-2">
-            <input type="text" value="${escHtml(item.name)}" placeholder="商品名"
-                oninput="currentItems[${idx}].name=this.value"
-                class="flex-1 px-2 py-1.5 border rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-teal-400 min-w-0">
-            <span class="text-xs text-gray-400 flex-shrink-0">×</span>
-            <input type="number" value="${item.qty}" min="1"
-                oninput="currentItems[${idx}].qty=Math.max(1,parseInt(this.value)||1);calcItemsTotal()"
-                class="w-10 px-1 py-1.5 border rounded-lg text-xs text-center bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
-            <span class="text-xs text-gray-400 flex-shrink-0">¥</span>
-            <input type="number" value="${item.price}" min="0"
-                oninput="currentItems[${idx}].price=Math.max(0,parseInt(this.value)||0);calcItemsTotal()"
-                class="w-16 px-1 py-1.5 border rounded-lg text-xs text-right bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
-            <button onclick="removeItem(${idx})" class="text-red-400 text-sm px-1 flex-shrink-0 active:text-red-600">✕</button>
+        <div class="bg-gray-50 rounded-xl p-2 space-y-1.5">
+            <div class="flex items-center gap-1">
+                <input type="text" value="${escHtml(item.name)}" placeholder="商品名"
+                    oninput="currentItems[${idx}].name=this.value"
+                    class="flex-1 px-2 py-1.5 border rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-teal-400 min-w-0">
+                <button onclick="removeItem(${idx})" class="text-red-400 text-sm px-1.5 flex-shrink-0 active:text-red-600">✕</button>
+            </div>
+            <div class="flex items-center gap-1">
+                ${catSelectHtml(item.category || 'other', `currentItems[${idx}].category=this.value`)}
+                <span class="text-xs text-gray-400 flex-shrink-0 px-0.5">×</span>
+                <input type="number" value="${item.qty}" min="1"
+                    oninput="currentItems[${idx}].qty=Math.max(1,parseInt(this.value)||1);calcItemsTotal()"
+                    class="w-10 px-1 py-1.5 border rounded-lg text-xs text-center bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
+                <span class="text-xs text-gray-400 flex-shrink-0">¥</span>
+                <input type="number" value="${item.price}" min="0"
+                    oninput="currentItems[${idx}].price=Math.max(0,parseInt(this.value)||0);calcItemsTotal()"
+                    class="w-16 px-1 py-1.5 border rounded-lg text-xs text-right bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
+            </div>
         </div>
     `).join('');
     calcItemsTotal();
@@ -882,7 +913,7 @@ function toggleEditItemsSection() {
 }
 
 function addEditItem() {
-    editCurrentItems.push({ name: '', qty: 1, price: 0 });
+    editCurrentItems.push({ name: '', qty: 1, price: 0, category: editSelectedCategory });
     renderEditItems();
 }
 
@@ -899,19 +930,24 @@ function renderEditItems() {
         return;
     }
     container.innerHTML = editCurrentItems.map((item, idx) => `
-        <div class="item-row flex items-center gap-1 bg-gray-50 rounded-xl p-2">
-            <input type="text" value="${escHtml(item.name)}" placeholder="商品名"
-                oninput="editCurrentItems[${idx}].name=this.value"
-                class="flex-1 px-2 py-1.5 border rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-teal-400 min-w-0">
-            <span class="text-xs text-gray-400 flex-shrink-0">×</span>
-            <input type="number" value="${item.qty}" min="1"
-                oninput="editCurrentItems[${idx}].qty=Math.max(1,parseInt(this.value)||1);calcEditItemsTotal()"
-                class="w-10 px-1 py-1.5 border rounded-lg text-xs text-center bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
-            <span class="text-xs text-gray-400 flex-shrink-0">¥</span>
-            <input type="number" value="${item.price}" min="0"
-                oninput="editCurrentItems[${idx}].price=Math.max(0,parseInt(this.value)||0);calcEditItemsTotal()"
-                class="w-16 px-1 py-1.5 border rounded-lg text-xs text-right bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
-            <button onclick="removeEditItem(${idx})" class="text-red-400 text-sm px-1 flex-shrink-0 active:text-red-600">✕</button>
+        <div class="bg-gray-50 rounded-xl p-2 space-y-1.5">
+            <div class="flex items-center gap-1">
+                <input type="text" value="${escHtml(item.name)}" placeholder="商品名"
+                    oninput="editCurrentItems[${idx}].name=this.value"
+                    class="flex-1 px-2 py-1.5 border rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-teal-400 min-w-0">
+                <button onclick="removeEditItem(${idx})" class="text-red-400 text-sm px-1.5 flex-shrink-0 active:text-red-600">✕</button>
+            </div>
+            <div class="flex items-center gap-1">
+                ${catSelectHtml(item.category || 'other', `editCurrentItems[${idx}].category=this.value`)}
+                <span class="text-xs text-gray-400 flex-shrink-0 px-0.5">×</span>
+                <input type="number" value="${item.qty}" min="1"
+                    oninput="editCurrentItems[${idx}].qty=Math.max(1,parseInt(this.value)||1);calcEditItemsTotal()"
+                    class="w-10 px-1 py-1.5 border rounded-lg text-xs text-center bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
+                <span class="text-xs text-gray-400 flex-shrink-0">¥</span>
+                <input type="number" value="${item.price}" min="0"
+                    oninput="editCurrentItems[${idx}].price=Math.max(0,parseInt(this.value)||0);calcEditItemsTotal()"
+                    class="w-16 px-1 py-1.5 border rounded-lg text-xs text-right bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
+            </div>
         </div>
     `).join('');
     calcEditItemsTotal();
@@ -1114,7 +1150,18 @@ function renderSummary() {
 
     const breakdown = {};
     CATEGORIES.forEach(c => { breakdown[c.id] = 0; });
-    data.forEach(d => { breakdown[d.category] = (breakdown[d.category] || 0) + d.amount; });
+    const validCatIds = new Set(CATEGORIES.map(c => c.id));
+    data.forEach(d => {
+        if (d.items && d.items.length > 0) {
+            d.items.forEach(item => {
+                const cat = validCatIds.has(item.category) ? item.category : (d.category || 'other');
+                breakdown[cat] = (breakdown[cat] || 0) + item.qty * item.price;
+            });
+        } else {
+            const cat = d.category || 'other';
+            breakdown[cat] = (breakdown[cat] || 0) + d.amount;
+        }
+    });
 
     const sorted = CATEGORIES.filter(c => breakdown[c.id] > 0)
         .sort((a, b) => breakdown[b.id] - breakdown[a.id]);
@@ -1147,7 +1194,10 @@ function exportCSV() {
     [...db].sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(d => {
         const cat = CATEGORIES.find(c => c.id === d.category)?.label || 'その他';
         const itemsStr = d.items && d.items.length > 0
-            ? d.items.map(i => `${i.name}×${i.qty}@¥${i.price}`).join(' / ')
+            ? d.items.map(i => {
+                const catLabel = CATEGORIES.find(c => c.id === i.category)?.label || '';
+                return `${i.name}×${i.qty}@¥${i.price}${catLabel ? `[${catLabel}]` : ''}`;
+              }).join(' / ')
             : '';
         csv += `${d.date},${d.amount},${cat},"${(d.memo||'').replace(/"/g,'""')}","${itemsStr.replace(/"/g,'""')}"\n`;
     });
