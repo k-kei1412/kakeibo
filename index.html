@@ -620,16 +620,20 @@ function processAndPreview(srcCanvas) {
     nbX.drawImage(preview, 0, 0);
     const nb = nbX.getImageData(0, 0, W, H).data;
 
-    // ⑤ 局所コントラスト強調（二値化なし・グレースケール保持）
-    //    局所背景を220相当に正規化し、アンシャープマスクでエッジを強調
-    //    → 完全白黒にしないためOCRが文字形状を正確に認識しやすい
+    // ⑤ 局所コントラスト強調（グレースケール保持・メリハリ強め）
+    //    局所背景を245相当に正規化し、S字カーブで暗部↓明部↑に強調
     for (let i = 0; i < N; i++) {
-        const localBg  = Math.max(bg[i*4], 60); // 0除算防止
-        const ratio    = Math.min(2.2, 220 / localBg); // 局所背景を約220に正規化
+        const localBg  = Math.max(bg[i*4], 50);
+        const ratio    = Math.min(3.0, 245 / localBg);
         const norm     = Math.min(255, d[i*4] * ratio);
         const nbNorm   = Math.min(255, nb[i*4] * ratio);
-        const sharpened = Math.max(0, Math.min(255, norm + 1.3 * (norm - nbNorm)));
-        d[i*4] = d[i*4+1] = d[i*4+2] = Math.round(sharpened);
+        const sharpened = Math.max(0, Math.min(255, norm + 2.0 * (norm - nbNorm)));
+        // S字カーブ: 暗い部分をより黒く、明るい部分をより白く
+        const t = sharpened / 255;
+        const curved = t < 0.5
+            ? 255 * 0.5 * Math.pow(2 * t, 1.6)
+            : 255 * (1 - 0.5 * Math.pow(2 * (1 - t), 1.6));
+        d[i*4] = d[i*4+1] = d[i*4+2] = Math.round(curved);
         d[i*4+3] = 255;
     }
     ctx.putImageData(imgData, 0, 0);
@@ -936,15 +940,6 @@ function parseReceiptText(rawText) {
             if (v >= 100 && v <= 999999 && v > amount) amount = v;
         }
     }
-    if (amount === 0) {
-        // フォールバック②: レシート後半の行で最大の金額（合計は通常下部にある）
-        const halfStart = Math.floor(lines.length * 0.5);
-        for (let i = halfStart; i < lines.length; i++) {
-            if (exKw.test(lines[i])) continue;
-            const nums = extractAmounts(lines[i], 100, 999999);
-            if (nums.length) { const v = Math.max(...nums); if (v > amount) amount = v; }
-        }
-    }
 
     let memo = '';
     for (const line of lines) {
@@ -956,12 +951,17 @@ function parseReceiptText(rawText) {
 
     // --- 商品行抽出 ---
     const items = [];
+    // 小計・合計が出たらそれ以降は商品行ではない（ここで打ち切る）
+    const stopKw     = /小\s*計|合\s*計|TOTAL|total|Subtotal|SUBTOTAL/;
     const totalKw    = /合計|小計|消費税|お支払|請求|TOTAL|AMOUNT|お買上|お釣|預かり/;
     const discountKw = /値引|割引|ポイント|クーポン|discount/i;
     // 数字・記号・スペースだけでない行 = 商品名を含む行
     const hasNameChars = /[^\d\s¥￥\/\-\.\,×xｘ@＠*＊#＃()（）%％]/;
 
     for (const line of lines) {
+        // 小計・合計行が来たら商品行の走査を終了
+        if (stopKw.test(line)) break;
+
         // --- 割引・値引き → マイナス ---
         if (discountKw.test(line)) {
             const nums = extractAmounts(line, 1, 99999);
