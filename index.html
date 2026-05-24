@@ -483,7 +483,8 @@ function init() {
 }
 
 function setTodayDate() {
-    const today = new Date().toISOString().split('T')[0];
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     document.getElementById('inputDate').value = today;
 }
 
@@ -906,7 +907,8 @@ function parseReceiptText(rawText) {
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
     // --- 日付抽出 ---
-    let date = new Date().toISOString().split('T')[0];
+    const _dn = new Date();
+    let date = `${_dn.getFullYear()}-${String(_dn.getMonth()+1).padStart(2,'0')}-${String(_dn.getDate()).padStart(2,'0')}`;
     const datePatterns = [
         { re: /(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/, reiwa: false },
         { re: /令和\s*(\d{1,2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/, reiwa: true },
