@@ -61,11 +61,11 @@
                     </div>
                     <div>
                         <label class="block text-xs text-gray-500 font-bold mb-1">合計金額 (円)</label>
-                        <div class="flex gap-2 items-stretch">
+                        <div class="flex gap-2 items-center">
                             <input type="number" id="inputAmount" inputmode="numeric" placeholder="0"
                                 oninput="if(itemsVisible) calcItemsTotal()"
                                 class="flex-1 p-3 border rounded-xl text-right text-xl font-bold focus:outline-none focus:ring-2 focus:ring-teal-400">
-                            <button onclick="openCalc()" class="calc-btn px-3 bg-gray-100 text-gray-700 rounded-xl text-xl active:bg-gray-200 border border-gray-200" title="電卓を開く">🧮</button>
+                            <button onclick="openCalc()" class="calc-btn shrink-0 py-3 px-4 bg-gray-100 text-gray-700 rounded-xl text-2xl active:bg-gray-200 border border-gray-200 flex items-center justify-center" title="電卓を開く">🧮</button>
                         </div>
                     </div>
 
@@ -292,7 +292,7 @@
     </div>
 
     <!-- ===== 固定費設定モーダル ===== -->
-    <div id="fixed-modal" class="fixed inset-0 z-50 hidden">
+    <div id="fixed-modal" class="fixed inset-0 z-[60] hidden">
         <div class="absolute inset-0 bg-black/50" onclick="closeFixedModal()"></div>
         <div class="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl max-w-lg mx-auto" style="max-height:90vh;overflow-y:auto">
             <div class="p-5">
@@ -1453,7 +1453,8 @@ function openFixedModal() {
 
 function closeFixedModal() {
     document.getElementById('fixed-modal').classList.add('hidden');
-    document.body.style.overflow = 'hidden'; // settings still open
+    const settingsOpen = !document.getElementById('settings-modal').classList.contains('hidden');
+    if (!settingsOpen) document.body.style.overflow = '';
     updateFixedCountLabel();
 }
 
