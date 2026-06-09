@@ -62,10 +62,12 @@
                     <div>
                         <label class="block text-xs text-gray-500 font-bold mb-1">合計金額 (円)</label>
                         <div class="flex gap-2 items-center">
-                            <input type="number" id="inputAmount" inputmode="numeric" placeholder="0"
-                                oninput="if(itemsVisible) calcItemsTotal()"
+                            <input type="text" id="inputAmount" inputmode="numeric" placeholder="0"
                                 class="flex-1 p-3 border rounded-xl text-right text-xl font-bold focus:outline-none focus:ring-2 focus:ring-teal-400">
-                            <button onclick="openCalc()" class="calc-btn shrink-0 py-3 px-4 bg-gray-100 text-gray-700 rounded-xl text-2xl active:bg-gray-200 border border-gray-200 flex items-center justify-center" title="電卓を開く">🧮</button>
+                            <button onclick="openCalc()" class="calc-btn shrink-0 py-2 px-3 bg-gray-100 text-gray-700 rounded-xl active:bg-gray-200 border border-gray-200 text-center" style="min-width:52px;min-height:52px;line-height:1.2">
+                                <div style="font-size:1.4rem">🧮</div>
+                                <div style="font-size:9px;font-weight:700">電卓</div>
+                            </button>
                         </div>
                     </div>
 
@@ -310,7 +312,7 @@
                     </div>
                     <div class="flex gap-2 items-center">
                         <span class="text-xs text-gray-500 shrink-0">¥</span>
-                        <input type="number" id="fixedAmount" inputmode="numeric" placeholder="金額"
+                        <input type="text" id="fixedAmount" inputmode="numeric" placeholder="金額"
                             class="flex-1 p-2.5 border rounded-xl text-sm text-right focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white">
                         <span class="text-xs text-gray-500 shrink-0">毎月</span>
                         <input type="number" id="fixedDay" inputmode="numeric" placeholder="日" min="1" max="28"
@@ -476,6 +478,22 @@ function init() {
     setCurrentMonthInSummary();
     renderSummary();
     document.getElementById('input-form').classList.remove('hidden');
+
+    // 金額入力リアルタイムカンマ（requestAnimationFrameでモバイル確実対応）
+    function bindCommaInput(id, onChange) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('input', function() {
+            var target = this;
+            requestAnimationFrame(function() {
+                var formatted = addCommas(target.value);
+                if (target.value !== formatted) target.value = formatted;
+                if (onChange) onChange();
+            });
+        });
+    }
+    bindCommaInput('inputAmount', function() { if (itemsVisible) calcItemsTotal(); });
+    bindCommaInput('fixedAmount', null);
 }
 
 function setTodayDate() {
@@ -527,18 +545,38 @@ function switchTab(tab) {
     }
 }
 
+// ===== 金額フォーマット =====
+function onItemPriceInput(el, idx, arr, prefix) {
+    requestAnimationFrame(function() {
+        var formatted = addCommas(el.value);
+        if (el.value !== formatted) el.value = formatted;
+        arr[idx].price = parseInt(el.value.replace(/[^0-9]/g, '')) || 0;
+        refreshItemSub(idx, prefix, arr);
+    });
+}
+
+function addCommas(str) {
+    var raw = str.replace(/[^0-9]/g, '');
+    if (!raw) return '';
+    return raw.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function getInputAmount() {
+    return parseInt((document.getElementById('inputAmount').value || '').replace(/[^0-9]/g, ''), 10) || 0;
+}
+
 // ===== データ保存 =====
 function saveEntry() {
     const date   = document.getElementById('inputDate').value;
-    const amount = document.getElementById('inputAmount').value;
+    const amount = getInputAmount();
     const memo   = document.getElementById('inputMemo').value;
     const paymentMethod = document.getElementById('inputPayment').value || loadPaymentMethods()[0];
 
     if (!date) { showToast('日付を入力してください'); return; }
-    if (!amount || parseInt(amount) <= 0) { showToast('金額を入力してください'); return; }
+    if (amount <= 0) { showToast('金額を入力してください'); return; }
 
     const validItems = currentItems.filter(i => i.name || i.price > 0);
-    const entry = { id: Date.now(), date, amount: parseInt(amount), category: selectedCategory, memo, paymentMethod };
+    const entry = { id: Date.now(), date, amount, category: selectedCategory, memo, paymentMethod };
     if (validItems.length > 0) entry.items = validItems;
 
     db.push(entry);
@@ -1180,9 +1218,9 @@ function renderItems() {
                     oninput="currentItems[${idx}].qty=Math.max(1,parseInt(this.value)||1);refreshItemSub(${idx},'item-sub-',currentItems)"
                     class="w-10 px-1 py-1.5 border rounded-lg text-xs text-center bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
                 <span class="text-xs text-gray-400 flex-shrink-0">¥</span>
-                <input type="number" value="${item.price}"
-                    oninput="currentItems[${idx}].price=parseInt(this.value)||0;refreshItemSub(${idx},'item-sub-',currentItems)"
-                    class="w-16 px-1 py-1.5 border rounded-lg text-xs text-right bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
+                <input type="text" inputmode="numeric" value="${item.price > 0 ? addCommas(String(item.price)) : ''}"
+                    oninput="onItemPriceInput(this,${idx},currentItems,'item-sub-')"
+                    class="w-20 px-1 py-1.5 border rounded-lg text-xs text-right bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
             </div>
         </div>`;
     }).join('');
@@ -1206,7 +1244,7 @@ function calcItemsTotal() {
     const total = currentItems.reduce((s, i) => s + i.qty * i.price, 0);
     const noteEl = document.getElementById('items-total-note');
     if (currentItems.length > 0) {
-        const entered = parseInt(document.getElementById('inputAmount').value) || 0;
+        const entered = getInputAmount();
         const itemsStr = total >= 0 ? `¥${total.toLocaleString()}` : `-¥${Math.abs(total).toLocaleString()}`;
         const diff = entered - total;
         let diffHtml = '';
@@ -1271,9 +1309,9 @@ function renderEditItems() {
                     oninput="editCurrentItems[${idx}].qty=Math.max(1,parseInt(this.value)||1);refreshItemSub(${idx},'edit-sub-',editCurrentItems)"
                     class="w-10 px-1 py-1.5 border rounded-lg text-xs text-center bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
                 <span class="text-xs text-gray-400 flex-shrink-0">¥</span>
-                <input type="number" value="${item.price}"
-                    oninput="editCurrentItems[${idx}].price=parseInt(this.value)||0;refreshItemSub(${idx},'edit-sub-',editCurrentItems)"
-                    class="w-16 px-1 py-1.5 border rounded-lg text-xs text-right bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
+                <input type="text" inputmode="numeric" value="${item.price > 0 ? addCommas(String(item.price)) : ''}"
+                    oninput="onItemPriceInput(this,${idx},editCurrentItems,'edit-sub-')"
+                    class="w-20 px-1 py-1.5 border rounded-lg text-xs text-right bg-white focus:outline-none focus:ring-1 focus:ring-teal-400">
             </div>
         </div>`;
     }).join('');
@@ -1387,7 +1425,7 @@ function calcOp(op) {
 function applyCalcResult() {
     const val = parseFloat(calcCurrentNum);
     if (!isNaN(val) && val > 0) {
-        document.getElementById('inputAmount').value = Math.round(val);
+        document.getElementById('inputAmount').value = addCommas(String(Math.round(val)));
         if (itemsVisible) calcItemsTotal();
         closeCalc();
         showToast('金額に反映しました');
@@ -1410,8 +1448,17 @@ function saveFixedExpenses(expenses) {
 }
 
 function loadFixedApplied() {
-    try { return JSON.parse(localStorage.getItem(FIXED_APPLIED_KEY)) || []; }
-    catch { return []; }
+    try {
+        const data = JSON.parse(localStorage.getItem(FIXED_APPLIED_KEY));
+        // 旧フォーマット（配列）は破棄してオブジェクト形式に移行
+        if (!data || Array.isArray(data)) return {};
+        return data;
+    }
+    catch { return {}; }
+}
+
+function saveFixedApplied(applied) {
+    localStorage.setItem(FIXED_APPLIED_KEY, JSON.stringify(applied));
 }
 
 function applyFixedExpenses() {
@@ -1421,13 +1468,16 @@ function applyFixedExpenses() {
     const now = new Date();
     const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
     const applied = loadFixedApplied();
-    if (applied.includes(currentMonthKey)) return;
-
+    const appliedThisMonth = applied[currentMonthKey] || [];
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+
+    let count = 0;
     expenses.forEach((exp, i) => {
+        if (!exp.id) exp.id = `legacy_${i}`; // 旧データにIDを付与
+        if (appliedThisMonth.includes(exp.id)) return;
         const day = Math.min(exp.day || 1, lastDay);
         db.push({
-            id: Date.now() + i + Math.random(),
+            id: Date.now() + i * 100 + Math.random(),
             date: `${currentMonthKey}-${String(day).padStart(2,'0')}`,
             amount: exp.amount,
             category: exp.category || 'other',
@@ -1435,12 +1485,17 @@ function applyFixedExpenses() {
             paymentMethod: exp.paymentMethod || '現金',
             isFixed: true
         });
+        appliedThisMonth.push(exp.id);
+        count++;
     });
 
-    localStorage.setItem('kakeibo_v2', JSON.stringify(db));
-    applied.push(currentMonthKey);
-    localStorage.setItem(FIXED_APPLIED_KEY, JSON.stringify(applied));
-    if (expenses.length > 0) showToast(`📅 ${expenses.length}件の固定費を今月分として記録しました`);
+    if (count > 0) {
+        applied[currentMonthKey] = appliedThisMonth;
+        localStorage.setItem('kakeibo_v2', JSON.stringify(db));
+        saveFixedExpenses(expenses);
+        saveFixedApplied(applied);
+        showToast(`📅 ${count}件の固定費を今月分として記録しました`);
+    }
 }
 
 function openFixedModal() {
@@ -1496,7 +1551,7 @@ function renderFixedList() {
 
 function addFixedExpense() {
     const name   = document.getElementById('fixedName').value.trim();
-    const amount = parseInt(document.getElementById('fixedAmount').value) || 0;
+    const amount = parseInt((document.getElementById('fixedAmount').value || '').replace(/[^0-9]/g, '')) || 0;
     const day    = Math.max(1, Math.min(28, parseInt(document.getElementById('fixedDay').value) || 1));
     const category = document.getElementById('fixedCategory').value || 'other';
     const paymentMethod = document.getElementById('fixedPayment').value || loadPaymentMethods()[0];
@@ -1504,16 +1559,40 @@ function addFixedExpense() {
     if (!name) { showToast('名前を入力してください'); return; }
     if (amount <= 0) { showToast('金額を入力してください'); return; }
 
+    const now = new Date();
+    const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const d = Math.min(day, lastDay);
+    const expId = `exp_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+
     const expenses = loadFixedExpenses();
-    expenses.push({ name, amount, day, category, paymentMethod });
+    expenses.push({ id: expId, name, amount, day, category, paymentMethod });
     saveFixedExpenses(expenses);
+
+    // 当月分を即座に記録（さかのぼって適用）
+    db.push({
+        id: Date.now() + Math.random(),
+        date: `${currentMonthKey}-${String(d).padStart(2,'0')}`,
+        amount, category: category || 'other',
+        memo: name || '固定費',
+        paymentMethod: paymentMethod || '現金',
+        isFixed: true
+    });
+    localStorage.setItem('kakeibo_v2', JSON.stringify(db));
+
+    const applied = loadFixedApplied();
+    const appliedThisMonth = applied[currentMonthKey] || [];
+    appliedThisMonth.push(expId);
+    applied[currentMonthKey] = appliedThisMonth;
+    saveFixedApplied(applied);
+    updateMonthFilters();
 
     document.getElementById('fixedName').value = '';
     document.getElementById('fixedAmount').value = '';
     document.getElementById('fixedDay').value = '';
 
     renderFixedList();
-    showToast(`「${name}」を固定費に追加しました`);
+    showToast(`「${name}」を固定費に追加しました（今月分も記録済み）`);
 }
 
 function removeFixedExpense(idx) {
