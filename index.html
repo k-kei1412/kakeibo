@@ -204,7 +204,8 @@
                 <button onclick="calcOp('3')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">3</button>
                 <button onclick="calcOp('+')" class="calc-btn py-4 bg-teal-100 text-teal-700 rounded-xl font-bold text-xl active:bg-teal-200">+</button>
 
-                <button onclick="calcOp('0')" class="calc-btn col-span-2 py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">0</button>
+                <button onclick="calcOp('0')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">0</button>
+                <button onclick="calcOp('.')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">.</button>
                 <button onclick="calcOp('=')" class="calc-btn py-4 bg-teal-600 text-white rounded-xl font-bold text-xl active:bg-teal-700">=</button>
                 <button onclick="applyCalcResult()" class="calc-btn py-4 bg-orange-500 text-white rounded-xl font-bold text-sm active:bg-orange-600">反映</button>
             </div>
@@ -1339,14 +1340,12 @@ function calcEditItemsTotal() {
 
 // ===== 電卓 =====
 let calcCurrentNum = '0';
-let calcPrevNum = null;
-let calcOperator = null;
+let calcExpression = [];
 let calcShouldReset = false;
 
 function openCalc() {
     calcCurrentNum = '0';
-    calcPrevNum = null;
-    calcOperator = null;
+    calcExpression = [];
     calcShouldReset = false;
     document.getElementById('calc-display').textContent = '0';
     document.getElementById('calc-sub-display').textContent = '';
@@ -1360,6 +1359,23 @@ function closeCalc() {
 }
 
 function calcOp(op) {
+    const display = document.getElementById('calc-display');
+    const subDisplay = document.getElementById('calc-sub-display');
+
+    const updateDisplay = () => {
+        if (calcCurrentNum.endsWith('.')) {
+            display.textContent = calcCurrentNum;
+        } else {
+            const num = parseFloat(calcCurrentNum);
+            display.textContent = isNaN(num) ? '0' : num.toLocaleString();
+        }
+    };
+
+    const updateSubDisplay = () => {
+        const parts = calcExpression.map((e, i) => i % 2 === 0 ? parseFloat(e).toLocaleString() : e);
+        subDisplay.textContent = parts.join(' ');
+    };
+
     if ('0123456789'.includes(op)) {
         if (calcShouldReset) {
             calcCurrentNum = op;
@@ -1367,65 +1383,76 @@ function calcOp(op) {
         } else {
             calcCurrentNum = calcCurrentNum === '0' ? op : calcCurrentNum + op;
         }
-        document.getElementById('calc-display').textContent = parseInt(calcCurrentNum).toLocaleString();
+        updateDisplay();
+        return;
+    }
+    if (op === '.') {
+        if (calcShouldReset) {
+            calcCurrentNum = '0.';
+            calcShouldReset = false;
+        } else if (!calcCurrentNum.includes('.')) {
+            calcCurrentNum += '.';
+        }
+        display.textContent = calcCurrentNum;
         return;
     }
     if (op === 'C') {
-        calcCurrentNum = '0'; calcPrevNum = null; calcOperator = null; calcShouldReset = false;
-        document.getElementById('calc-display').textContent = '0';
-        document.getElementById('calc-sub-display').textContent = '';
+        calcCurrentNum = '0';
+        calcExpression = [];
+        calcShouldReset = false;
+        display.textContent = '0';
+        subDisplay.textContent = '';
         return;
     }
     if (op === '⌫') {
-        if (!calcShouldReset && calcCurrentNum.length > 1) {
+        if (calcShouldReset && calcExpression.length > 0) {
+            calcExpression.pop();
+            const prevNum = calcExpression.pop();
+            calcCurrentNum = String(prevNum);
+            calcShouldReset = false;
+        } else if (calcCurrentNum.length > 1) {
             calcCurrentNum = calcCurrentNum.slice(0, -1);
         } else {
             calcCurrentNum = '0';
-            calcShouldReset = false;
         }
-        document.getElementById('calc-display').textContent = parseInt(calcCurrentNum).toLocaleString();
+        updateSubDisplay();
+        updateDisplay();
         return;
     }
     if (op === '=') {
-        if (calcOperator && calcPrevNum !== null) {
-            const a = parseFloat(calcPrevNum), b = parseFloat(calcCurrentNum);
-            let result;
-            switch (calcOperator) {
-                case '+': result = a + b; break;
-                case '-': result = a - b; break;
-                case '×': result = a * b; break;
-                case '÷': result = b !== 0 ? a / b : 0; break;
-                default: result = b;
+        if (calcExpression.length >= 2) {
+            const expr = [...calcExpression, parseFloat(calcCurrentNum)];
+            let result = parseFloat(expr[0]);
+            for (let i = 1; i < expr.length; i += 2) {
+                const operator = expr[i];
+                const operand = parseFloat(expr[i + 1]);
+                switch (operator) {
+                    case '+': result += operand; break;
+                    case '-': result -= operand; break;
+                    case '×': result *= operand; break;
+                    case '÷': result = operand !== 0 ? result / operand : 0; break;
+                }
             }
             result = Math.round(result * 100) / 100;
-            document.getElementById('calc-sub-display').textContent = `${parseInt(calcPrevNum).toLocaleString()} ${calcOperator} ${parseInt(calcCurrentNum).toLocaleString()} =`;
+            const subParts = expr.map((e, i) => i % 2 === 0 ? parseFloat(e).toLocaleString() : e);
+            subDisplay.textContent = subParts.join(' ') + ' =';
             calcCurrentNum = String(result);
-            calcPrevNum = null; calcOperator = null; calcShouldReset = true;
-            document.getElementById('calc-display').textContent = result.toLocaleString();
+            calcExpression = [];
+            calcShouldReset = true;
+            display.textContent = result.toLocaleString();
         }
         return;
     }
     if (['+', '-', '×', '÷'].includes(op)) {
-        if (calcPrevNum !== null && !calcShouldReset) {
-            const a = parseFloat(calcPrevNum), b = parseFloat(calcCurrentNum);
-            let result;
-            switch (calcOperator) {
-                case '+': result = a + b; break;
-                case '-': result = a - b; break;
-                case '×': result = a * b; break;
-                case '÷': result = b !== 0 ? a / b : 0; break;
-                default: result = b;
-            }
-            result = Math.round(result * 100) / 100;
-            calcPrevNum = String(result);
-            calcCurrentNum = String(result);
-            document.getElementById('calc-display').textContent = result.toLocaleString();
+        if (calcShouldReset && calcExpression.length > 0) {
+            calcExpression[calcExpression.length - 1] = op;
         } else {
-            calcPrevNum = calcCurrentNum;
+            calcExpression.push(parseFloat(calcCurrentNum));
+            calcExpression.push(op);
+            calcShouldReset = true;
         }
-        document.getElementById('calc-sub-display').textContent = `${parseInt(calcPrevNum).toLocaleString()} ${op}`;
-        calcOperator = op;
-        calcShouldReset = true;
+        updateSubDisplay();
+        return;
     }
 }
 
