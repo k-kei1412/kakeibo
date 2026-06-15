@@ -11,38 +11,160 @@
     <link rel="apple-touch-icon" href="household_account_icon_1.png">
     <link rel="manifest" href="manifest.json">
     <title>📒 スマート家計簿</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         * { -webkit-tap-highlight-color: transparent; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', sans-serif; }
-        .tab-active { border-bottom: 3px solid #0d9488; color: #0d9488; font-weight: 700; }
+        body {
+            font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Hiragino Sans', sans-serif;
+            background: #f0f4ff !important;
+        }
+
+        /* ===== Header — deep indigo gradient (ブルべ) ===== */
+        header.sticky {
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 45%, #4f46e5 100%) !important;
+            box-shadow: 0 4px 24px rgba(30,27,75,0.30) !important;
+        }
+
+        /* ===== Tab navigation ===== */
+        .tab-active  { border-bottom: 3px solid #4f46e5; color: #4f46e5; font-weight: 700; }
         .tab-inactive { border-bottom: 3px solid transparent; color: #9ca3af; }
-        .category-btn.selected { background-color: #0d9488; color: white; border-color: #0d9488; }
-        .slide-up { animation: slideUp 0.3s ease-out; }
-        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        /* ===== Category Buttons — clear 2px border, friendly ===== */
+        .category-btn {
+            border: 2px solid #9ca3af !important;
+            background: #ffffff !important;
+            color: #374151 !important;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+            transition: all 0.15s ease;
+        }
+        .category-btn.selected {
+            background: #4f46e5 !important;
+            color: white !important;
+            border-color: #4f46e5 !important;
+            box-shadow: 0 4px 14px rgba(79,70,229,0.38) !important;
+        }
+
+        /* ===== Calculator number keys — clearly visible ===== */
+        .calc-btn.bg-white {
+            background-color: #f9fafb !important;
+            border: 2px solid #9ca3af !important;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08), 0 1px 0 rgba(0,0,0,0.04);
+            color: #111827 !important;
+            font-weight: 700;
+        }
+
+        /* ===== Theme: ブルべ (indigo/lavender = cool & elegant) ===== */
+        .bg-teal-600 { background-color: #4f46e5 !important; }
+        .bg-teal-500 { background-color: #6366f1 !important; }
+        .bg-teal-400 { background-color: #818cf8 !important; }
+        .bg-teal-200 { background-color: #c7d2fe !important; }
+        .bg-teal-100 { background-color: #e0e7ff !important; }
+        .bg-teal-50  { background-color: #eef2ff !important; }
+        .bg-emerald-500 { background-color: #6366f1 !important; }
+        .text-teal-600 { color: #4f46e5 !important; }
+        .text-teal-700 { color: #4338ca !important; }
+        .text-teal-500 { color: #6366f1 !important; }
+        .text-teal-200 { color: #c7d2fe !important; }
+        .text-teal-300 { color: #a5b4fc !important; }
+        .border-teal-200 { border-color: #a5b4fc !important; }
+        .active\:bg-teal-700:active { background-color: #4338ca !important; }
+        .active\:bg-teal-600:active { background-color: #4f46e5 !important; }
+        .active\:bg-teal-200:active { background-color: #c7d2fe !important; }
+        .active\:bg-teal-100:active { background-color: #e0e7ff !important; }
+        .focus\:ring-teal-400:focus  { --tw-ring-color: #818cf8 !important; }
+
+        /* ===== Summary total card — deep indigo gradient ===== */
+        .bg-teal-600.rounded-2xl {
+            background: linear-gradient(135deg, #312e81 0%, #4f46e5 100%) !important;
+        }
+
+        /* ===== Cards — visible, cool borders ===== */
+        .border-gray-100 { border-color: #e0e7ff !important; }
+        .border-gray-200 { border-color: #c7d2fe !important; }
+
+        /* ===== Generously rounded corners ===== */
+        .rounded-2xl { border-radius: 1.25rem !important; }
+        .rounded-xl  { border-radius: 0.875rem !important; }
+        .rounded-lg  { border-radius: 0.625rem !important; }
+
+        /* ===== Bottom nav — frosted glass ===== */
+        nav.fixed.bottom-0 {
+            background: rgba(255,255,255,0.94) !important;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-top: 1px solid rgba(199,210,254,0.7) !important;
+        }
+
+        /* ===== Card shadow upgrade ===== */
+        .shadow-sm { box-shadow: 0 2px 8px rgba(79,70,229,0.07), 0 1px 2px rgba(0,0,0,0.04) !important; }
+        .shadow-md { box-shadow: 0 4px 16px rgba(79,70,229,0.12), 0 2px 4px rgba(0,0,0,0.06) !important; }
+
+        /* ===== Animations ===== */
+        .slide-up { animation: slideUp 0.25s cubic-bezier(0.16,1,0.3,1); }
+        @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
         input[type="number"]::-webkit-inner-spin-button,
         input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
-        .toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: #1f2937; color: white; padding: 10px 20px; border-radius: 20px; font-size: 14px; z-index: 1000; animation: fadeInOut 2.5s ease forwards; white-space: nowrap; }
-        @keyframes fadeInOut { 0%{opacity:0;transform:translateX(-50%) translateY(10px)} 15%{opacity:1;transform:translateX(-50%) translateY(0)} 70%{opacity:1} 100%{opacity:0} }
+
+        /* ===== Toast ===== */
+        .toast {
+            position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+            background: #312e81; color: white; padding: 10px 22px; border-radius: 22px;
+            font-size: 14px; z-index: 1000; animation: fadeInOut 2.5s ease forwards; white-space: nowrap;
+            box-shadow: 0 8px 28px rgba(49,46,129,0.38);
+        }
+        @keyframes fadeInOut {
+            0%  { opacity: 0; transform: translateX(-50%) translateY(10px); }
+            15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+            70% { opacity: 1; }
+            100%{ opacity: 0; }
+        }
         .item-row input { height: 34px; }
         .calc-btn { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+
+        /* ===== 画面暗転オーバーレイ ===== */
+        .screen-dim {
+            position: fixed;
+            inset: 0;
+            z-index: 9998;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.48);
+            animation: screenDim 1.8s ease-out forwards;
+        }
+        @keyframes screenDim {
+            0%   { opacity: 0; }
+            12%  { opacity: 1; }
+            38%  { opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        /* 💴 パーティクルは JS の Web Animations API で制御（calc不要・GPUで滑らか） */
+        /* ===== 保存ボタン バウンス ===== */
+        @keyframes saveBtnBounce {
+            0%   { transform: scale(1); }
+            18%  { transform: scale(0.91); }
+            48%  { transform: scale(1.07); }
+            72%  { transform: scale(0.98); }
+            100% { transform: scale(1); }
+        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 min-h-screen">
 
     <!-- ヘッダー -->
-    <header class="bg-teal-600 text-white px-4 pt-10 pb-4 sticky top-0 z-10 shadow-md">
+    <header class="text-white px-4 pt-10 pb-4 sticky top-0 z-10">
         <div class="max-w-lg mx-auto flex justify-between items-start">
             <div>
-                <h1 class="text-xl font-bold">📒 スマート家計簿</h1>
-                <p class="text-xs text-teal-200 mt-0.5">データはこの端末のみに保存されます</p>
+                <h1 class="text-xl font-bold tracking-wide">📒 スマート家計簿</h1>
+                <p class="text-xs mt-0.5" style="color:#86efac;">データはこの端末のみに保存されます</p>
             </div>
             <button onclick="openSettings()" class="text-2xl opacity-80 active:opacity-50 mt-0.5" title="設定">⚙️</button>
         </div>
     </header>
 
     <!-- タブナビ -->
-    <nav class="bg-white shadow-sm sticky top-[88px] z-10">
+    <nav class="bg-white sticky top-[88px] z-10" style="box-shadow: 0 2px 12px rgba(0,0,0,0.07); border-bottom: 1px solid #e2e8f0;">
         <div class="max-w-lg mx-auto flex">
             <button class="flex-1 py-3 text-sm tab-active" id="tab-camera" onclick="switchTab('camera')">✏️ 入力</button>
             <button class="flex-1 py-3 text-sm tab-inactive" id="tab-list" onclick="switchTab('list')">📋 記録一覧</button>
@@ -183,26 +305,26 @@
                 <button onclick="closeCalc()" class="text-gray-400 text-2xl leading-none">&times;</button>
             </div>
             <div id="calc-sub-display" class="text-right text-xs text-gray-400 min-h-[18px] px-1 mb-0.5"></div>
-            <div id="calc-display" class="bg-gray-100 rounded-xl p-3 text-right text-3xl font-bold mb-3 min-h-[60px] flex items-center justify-end break-all">0</div>
+            <div id="calc-display" class="rounded-xl p-3 text-right text-3xl font-bold mb-3 min-h-[60px] flex items-center justify-end break-all" style="background:#eef2ff;border:2px solid #c7d2fe;color:#312e81;">0</div>
             <div class="grid grid-cols-4 gap-2">
-                <button onclick="calcOp('C')" class="calc-btn col-span-2 py-4 bg-red-100 text-red-600 rounded-xl font-bold text-base active:bg-red-200">C</button>
-                <button onclick="calcOp('⌫')" class="calc-btn py-4 bg-gray-100 text-gray-700 rounded-xl font-bold text-xl active:bg-gray-200">⌫</button>
-                <button onclick="calcOp('÷')" class="calc-btn py-4 bg-teal-100 text-teal-700 rounded-xl font-bold text-xl active:bg-teal-200">÷</button>
+                <button onclick="calcOp('C')" class="calc-btn col-span-2 py-4 bg-red-100 text-red-600 rounded-xl font-bold text-base active:bg-red-200 border-2 border-red-200">C</button>
+                <button onclick="calcOp('⌫')" class="calc-btn py-4 bg-gray-100 text-gray-700 rounded-xl font-bold text-xl active:bg-gray-200 border-2 border-gray-300">⌫</button>
+                <button onclick="calcOp('÷')" class="calc-btn py-4 bg-teal-100 text-teal-700 rounded-xl font-bold text-xl active:bg-teal-200 border-2 border-teal-200">÷</button>
 
                 <button onclick="calcOp('7')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">7</button>
                 <button onclick="calcOp('8')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">8</button>
                 <button onclick="calcOp('9')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">9</button>
-                <button onclick="calcOp('×')" class="calc-btn py-4 bg-teal-100 text-teal-700 rounded-xl font-bold text-xl active:bg-teal-200">×</button>
+                <button onclick="calcOp('×')" class="calc-btn py-4 bg-teal-100 text-teal-700 rounded-xl font-bold text-xl active:bg-teal-200 border-2 border-teal-200">×</button>
 
                 <button onclick="calcOp('4')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">4</button>
                 <button onclick="calcOp('5')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">5</button>
                 <button onclick="calcOp('6')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">6</button>
-                <button onclick="calcOp('-')" class="calc-btn py-4 bg-teal-100 text-teal-700 rounded-xl font-bold text-xl active:bg-teal-200">-</button>
+                <button onclick="calcOp('-')" class="calc-btn py-4 bg-teal-100 text-teal-700 rounded-xl font-bold text-xl active:bg-teal-200 border-2 border-teal-200">-</button>
 
                 <button onclick="calcOp('1')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">1</button>
                 <button onclick="calcOp('2')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">2</button>
                 <button onclick="calcOp('3')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">3</button>
-                <button onclick="calcOp('+')" class="calc-btn py-4 bg-teal-100 text-teal-700 rounded-xl font-bold text-xl active:bg-teal-200">+</button>
+                <button onclick="calcOp('+')" class="calc-btn py-4 bg-teal-100 text-teal-700 rounded-xl font-bold text-xl active:bg-teal-200 border-2 border-teal-200">+</button>
 
                 <button onclick="calcOp('0')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">0</button>
                 <button onclick="calcOp('.')" class="calc-btn py-4 bg-white border border-gray-200 rounded-xl font-bold text-xl active:bg-gray-50">.</button>
@@ -428,6 +550,17 @@ const CATEGORIES = [
     { id: 'other',   label: 'その他', emoji: '📦' },
 ];
 
+const CAT_COLORS = {
+    food:    { border: '#f43f5e', bg: '#fff1f2' },
+    daily:   { border: '#7c3aed', bg: '#f5f3ff' },
+    traffic: { border: '#2563eb', bg: '#eff6ff' },
+    health:  { border: '#c026d3', bg: '#fdf4ff' },
+    utility: { border: '#6366f1', bg: '#eef2ff' },
+    enter:   { border: '#db2777', bg: '#fdf2f8' },
+    clothes: { border: '#0891b2', bg: '#ecfeff' },
+    other:   { border: '#64748b', bg: '#f8fafc' },
+};
+
 // ===== データ管理 =====
 let db = JSON.parse(localStorage.getItem('kakeibo_v2')) || [];
 let selectedCategory = 'other';
@@ -473,6 +606,76 @@ function getCurrentPeriodKey() {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
     return getPeriodKey(today, getMonthStartDay());
+}
+
+// ===== 💴 マネーパーティクル（Web Animations API版・ぬるぬる60fps） =====
+function spawnMoneyParticles(btn) {
+    const rect = btn.getBoundingClientRect();
+    const cx = rect.left + rect.width  / 2;
+    const cy = rect.top  + rect.height / 2;
+
+    // ボタンバウンス
+    btn.style.animation = 'none';
+    void btn.offsetWidth;
+    btn.style.animation = 'saveBtnBounce 0.4s ease-out';
+    btn.addEventListener('animationend', () => { btn.style.animation = ''; }, { once: true });
+
+    // 画面暗転
+    const dimEl = document.createElement('div');
+    dimEl.className = 'screen-dim';
+    document.body.appendChild(dimEl);
+    dimEl.addEventListener('animationend', () => dimEl.remove());
+
+    const emojis = ['💴', '💴', '✨', '💰', '💴', '✨', '💴', '💴'];
+
+    emojis.forEach((emoji, i) => {
+        const el = document.createElement('span');
+        const fs = 2.8 + Math.random() * 1.0;
+
+        // DOMに追加してから実サイズを計測（正確な中心合わせのため）
+        el.style.cssText =
+            'position:fixed;z-index:9999;pointer-events:none;line-height:1;' +
+            'user-select:none;-webkit-user-select:none;' +
+            'will-change:transform,opacity;' +
+            `font-size:${fs}rem;left:0;top:0;visibility:hidden;`;
+        el.textContent = emoji;
+        document.body.appendChild(el);
+
+        // 計測 → ボタン中心を原点にするオフセット
+        const ox = cx - el.offsetWidth  / 2;
+        const oy = cy - el.offsetHeight / 2;
+        el.style.visibility = '';
+
+        // 軌道パラメータ
+        const frac = i / (emojis.length - 1);
+        const rad  = (-82 + frac * 164) * Math.PI / 180;
+        const dist = 130 + Math.random() * 90;
+        const tx   = Math.sin(rad) * dist;
+        const ty   = -(Math.cos(rad) * dist);
+        const rot  = (Math.random() - 0.5) * 360;
+
+        // 純粋なpx数値のみ → calc()不要 → GPUが滑らかに補間
+        const T = (px, py, s, r) =>
+            `translate(${ox + px}px,${oy + py}px) scale(${s}) rotate(${r}deg)`;
+
+        const anim = el.animate([
+            { transform: T(0,       0,       0.20, 0      ), opacity: 0    },
+            { transform: T(0,       0,       1.15, 0      ), opacity: 1,    offset: 0.05 },
+            { transform: T(tx*0.16, ty*0.22, 1.45, rot*0.10), opacity: 1,    offset: 0.15 },
+            { transform: T(tx*0.38, ty*0.50, 1.35, rot*0.28), opacity: 1,    offset: 0.32 },
+            { transform: T(tx*0.62, ty*0.80, 1.20, rot*0.52), opacity: 1,    offset: 0.52 },
+            { transform: T(tx*0.82, ty*0.97, 1.05, rot*0.74), opacity: 0.90, offset: 0.70 },
+            { transform: T(tx*0.94, ty*1.01, 0.88, rot*0.90), opacity: 0.45, offset: 0.84 },
+            { transform: T(tx,      ty*0.92, 0.60, rot     ), opacity: 0    },
+        ], {
+            duration: 2000,
+            delay:    i * 55,
+            easing:   'ease-out',
+            fill:     'forwards',
+        });
+
+        anim.onfinish = () => el.remove();
+    });
 }
 
 // ===== 初期化 =====
@@ -523,7 +726,7 @@ function buildCategoryButtons() {
     container.innerHTML = '';
     CATEGORIES.forEach(cat => {
         const btn = document.createElement('button');
-        btn.className = 'category-btn py-2 px-1 border rounded-xl text-xs font-semibold transition active:scale-95 flex flex-col items-center gap-0.5 border-gray-200';
+        btn.className = 'category-btn py-2 px-1 rounded-xl text-xs font-semibold transition active:scale-95 flex flex-col items-center gap-0.5';
         btn.dataset.id = cat.id;
         btn.innerHTML = `<span class="text-base">${cat.emoji}</span><span>${cat.label}</span>`;
         btn.onclick = () => selectCategory(cat.id);
@@ -590,6 +793,7 @@ function saveEntry() {
     db.push(entry);
     localStorage.setItem('kakeibo_v2', JSON.stringify(db));
     updateMonthFilters();
+    spawnMoneyParticles(document.getElementById('saveBtn'));
     showToast('✅ 記録しました！');
 
     setTodayDate();
@@ -599,7 +803,6 @@ function saveEntry() {
     clearItems();
     buildPaymentSelects();
 
-    setTimeout(() => switchTab('list'), 800);
 }
 
 function splitSaveEntries() {
@@ -621,6 +824,7 @@ function splitSaveEntries() {
 
     localStorage.setItem('kakeibo_v2', JSON.stringify(db));
     updateMonthFilters();
+    spawnMoneyParticles(document.getElementById('splitSaveBtn'));
     showToast(`✅ ${validItems.length}件を個別に記録しました！`);
 
     setTodayDate();
@@ -629,7 +833,6 @@ function splitSaveEntries() {
     selectCategory('other');
     clearItems();
 
-    setTimeout(() => switchTab('list'), 800);
 }
 
 // ===== 一覧表示 =====
@@ -666,16 +869,19 @@ function renderList() {
         const pmBadge = pm !== '現金'
             ? `<span class="ml-1 text-xs bg-blue-100 text-blue-600 rounded-full px-1.5 py-0.5">💳 ${escHtml(pm)}</span>`
             : `<span class="ml-1 text-xs bg-gray-100 text-gray-500 rounded-full px-1.5 py-0.5">💴 現金</span>`;
+        const cc = CAT_COLORS[item.category] || CAT_COLORS.other;
         html += `
-        <div class="flex items-center bg-white rounded-xl p-3 shadow-sm border border-gray-100 gap-3 slide-up" onclick="openEditModal(${item.id})" style="cursor:pointer">
-            <span class="text-2xl">${cat.emoji}</span>
+        <div class="flex items-center bg-white rounded-xl p-3 gap-3 slide-up" onclick="openEditModal(${item.id})" style="cursor:pointer;border-left:4px solid ${cc.border};border-top:1px solid #e0e7ff;border-right:1px solid #e0e7ff;border-bottom:1px solid #e0e7ff;">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style="background:${cc.bg};font-size:1.2rem;">
+                ${cat.emoji}
+            </div>
             <div class="flex-1 min-w-0">
                 <div class="text-xs text-gray-400 flex items-center flex-wrap gap-0.5">${cat.label}${badge}${fixedBadge}${pmBadge}</div>
-                <div class="text-sm text-gray-600 truncate">${item.memo || '—'}</div>
+                <div class="text-sm font-medium text-gray-700 truncate">${item.memo || '—'}</div>
             </div>
-            <div class="text-right mr-1">
-                <div class="font-bold text-gray-800">¥${item.amount.toLocaleString()}</div>
-                <div class="text-xs text-teal-500">タップして編集</div>
+            <div class="text-right">
+                <div class="font-bold text-gray-900 text-base">¥${item.amount.toLocaleString()}</div>
+                <div class="text-xs mt-0.5 font-medium" style="color:${cc.border}">▶ 編集</div>
             </div>
         </div>`;
     });
@@ -725,7 +931,7 @@ function buildEditCategoryButtons(selected) {
     container.innerHTML = '';
     CATEGORIES.forEach(cat => {
         const btn = document.createElement('button');
-        btn.className = 'category-btn py-2 px-1 border rounded-xl text-xs font-semibold transition active:scale-95 flex flex-col items-center gap-0.5 border-gray-200';
+        btn.className = 'category-btn py-2 px-1 rounded-xl text-xs font-semibold transition active:scale-95 flex flex-col items-center gap-0.5';
         btn.dataset.id = cat.id;
         btn.innerHTML = `<span class="text-base">${cat.emoji}</span><span>${cat.label}</span>`;
         btn.onclick = () => {
@@ -805,6 +1011,60 @@ function calcCategorySpending(filterPeriod) {
     return { data, breakdown };
 }
 
+function renderDonutChart(container, segments, center) {
+    const r = 105, cx = 155, cy = 130;
+
+    let ang = -Math.PI / 2;
+    const paths = [];
+    const lbls = [];
+
+    segments.forEach(s => {
+        if (s.pct <= 0) return;
+        const sweep = s.pct / 100 * 2 * Math.PI;
+        const end = ang + sweep;
+        const mid = ang + sweep / 2;
+        const x1 = cx + r * Math.cos(ang),  y1 = cy + r * Math.sin(ang);
+        const x2 = cx + r * Math.cos(end),  y2 = cy + r * Math.sin(end);
+        const lg = sweep > Math.PI ? 1 : 0;
+        paths.push(`<path d="M${cx},${cy}L${x1.toFixed(1)},${y1.toFixed(1)}A${r},${r} 0 ${lg} 1 ${x2.toFixed(1)},${y2.toFixed(1)}Z" fill="${s.color}" stroke="white" stroke-width="3"/>`);
+
+        if (s.pct >= 5) {
+            const lr = r + 58;
+            const lx = cx + lr * Math.cos(mid);
+            const ly = cy + lr * Math.sin(mid);
+            const anc = lx >= cx ? 'start' : 'end';
+            const lbl = s.label.length > 10 ? s.label.slice(0, 10) + '…' : s.label;
+            const ax = (cx + (r + 4) * Math.cos(mid)).toFixed(1);
+            const ay = (cy + (r + 4) * Math.sin(mid)).toFixed(1);
+            const bx = (cx + (r + 36) * Math.cos(mid)).toFixed(1);
+            const by = (cy + (r + 36) * Math.sin(mid)).toFixed(1);
+            lbls.push(`<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#d1d5db" stroke-width="1.5"/>
+<text x="${lx.toFixed(1)}" y="${(ly - 3).toFixed(1)}" text-anchor="${anc}" font-size="24" fill="#374151" font-family="sans-serif">${lbl}</text>
+<text x="${lx.toFixed(1)}" y="${(ly + 24).toFixed(1)}" text-anchor="${anc}" font-size="22" fill="#6b7280" font-family="sans-serif">${s.pct}%</text>`);
+        }
+        ang = end;
+    });
+
+    if (!paths.length) {
+        paths.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="#f3f4f6"/>`);
+    }
+
+    const legend = segments.map(s => `
+        <div class="flex items-center gap-2 py-2 border-b border-gray-50 last:border-0">
+            <div style="background:${s.color};color:#fff;border-radius:5px;padding:2px 6px;font-size:11px;font-weight:700;min-width:34px;text-align:center;flex-shrink:0;line-height:1.5">${s.pct}%</div>
+            <span class="text-sm flex-1 text-gray-700">${s.emoji ? s.emoji + ' ' : ''}${s.label}</span>
+            <span class="text-sm font-bold text-gray-900">¥${s.amount.toLocaleString()}</span>
+        </div>`).join('');
+
+    container.innerHTML = `
+        <div class="flex flex-col items-center">
+            <svg viewBox="-115 -80 560 480" width="100%" style="display:block;margin:0 auto">
+                ${paths.join('')}${lbls.join('')}
+            </svg>
+            <div class="w-full mt-1">${legend}</div>
+        </div>`;
+}
+
 function renderSummary() {
     const filterPeriod = document.getElementById('summaryMonth').value;
     const { data, breakdown } = calcCategorySpending(filterPeriod);
@@ -820,19 +1080,14 @@ function renderSummary() {
     if (sorted.length === 0) {
         container.innerHTML = '<p class="text-gray-400 text-sm text-center py-4">データがありません</p>';
     } else {
-        const max = breakdown[sorted[0].id] || 1;
-        container.innerHTML = sorted.map(cat => {
-            const pct = total > 0 ? Math.round(breakdown[cat.id] / total * 100) : 0;
-            const barW = Math.round(breakdown[cat.id] / max * 100);
-            return `
-            <div>
-                <div class="flex justify-between items-center mb-1">
-                    <span class="text-sm flex items-center gap-1.5">${cat.emoji} ${cat.label}</span>
-                    <span class="text-sm font-bold">¥${breakdown[cat.id].toLocaleString()} <span class="text-xs text-gray-400">${pct}%</span></span>
-                </div>
-                <div class="bg-gray-100 rounded-full h-2"><div class="bg-teal-500 h-2 rounded-full transition-all" style="width:${barW}%"></div></div>
-            </div>`;
-        }).join('');
+        const segments = sorted.map(cat => ({
+            color:  (CAT_COLORS[cat.id] || CAT_COLORS.other).border,
+            pct:    total > 0 ? Math.round(breakdown[cat.id] / total * 100) : 0,
+            label:  cat.label,
+            emoji:  cat.emoji,
+            amount: breakdown[cat.id],
+        }));
+        renderDonutChart(container, segments, { title: '合計支出', value: '¥' + total.toLocaleString() });
     }
 
     renderBudget(filterPeriod, breakdown);
@@ -917,20 +1172,16 @@ function renderPaymentBreakdown(filterPeriod) {
         container.innerHTML = '<p class="text-gray-400 text-sm text-center py-4">データがありません</p>';
         return;
     }
-    const max = sorted[0][1] || 1;
-    container.innerHTML = sorted.map(([method, amount]) => {
-        const pct = total > 0 ? Math.round(amount / total * 100) : 0;
-        const barW = Math.round(amount / max * 100);
-        const isCard = method !== '現金';
-        return `
-        <div>
-            <div class="flex justify-between items-center mb-1">
-                <span class="text-sm flex items-center gap-1.5">${isCard ? '💳' : '💴'} ${escHtml(method)}</span>
-                <span class="text-sm font-bold">¥${amount.toLocaleString()} <span class="text-xs text-gray-400">${pct}%</span></span>
-            </div>
-            <div class="bg-gray-100 rounded-full h-2"><div class="${isCard ? 'bg-blue-400' : 'bg-green-400'} h-2 rounded-full transition-all" style="width:${barW}%"></div></div>
-        </div>`;
-    }).join('');
+    const PM_COLORS = ['#2563eb', '#7c3aed', '#c026d3', '#db2777', '#0891b2', '#6366f1', '#64748b'];
+    let cardIdx = 0;
+    const segments = sorted.map(([method, amount]) => ({
+        color:  method === '現金' ? '#0d9488' : PM_COLORS[cardIdx++ % PM_COLORS.length],
+        pct:    total > 0 ? Math.round(amount / total * 100) : 0,
+        label:  escHtml(method),
+        emoji:  method === '現金' ? '💴' : '💳',
+        amount,
+    }));
+    renderDonutChart(container, segments, { title: '支払方法', value: sorted.length + '種類' });
 }
 
 // ===== 予算管理 =====
@@ -1024,10 +1275,10 @@ function renderBudget(filterPeriod, breakdown) {
 
     let html = '';
     if (totalBudget > 0) {
-        const barCol  = overTotal ? 'bg-red-400' : pctTotal > 80 ? 'bg-yellow-400' : 'bg-teal-500';
+        const barCol  = overTotal ? 'bg-red-400' : pctTotal > 80 ? 'bg-amber-400' : 'bg-emerald-500';
         const remHtml = overTotal
             ? `<span class="text-red-500 font-bold">-¥${Math.abs(totalRem).toLocaleString()} 超過</span>`
-            : `<span class="text-teal-600 font-bold">残り ¥${totalRem.toLocaleString()}</span>`;
+            : `<span class="font-bold" style="color:#4f46e5">残り ¥${totalRem.toLocaleString()}</span>`;
         html += `
         <div class="mb-4 pb-4 border-b border-gray-100">
             <div class="flex justify-between text-sm mb-1">
@@ -1050,11 +1301,11 @@ function renderBudget(filterPeriod, breakdown) {
             const catRem    = catBudget - catSpent;
             const isOver    = catBudget > 0 && catRem < 0;
             const pctCat    = catBudget > 0 ? Math.min(100, Math.round(catSpent / catBudget * 100)) : 0;
-            const barColCat = isOver ? 'bg-red-400' : pctCat > 80 ? 'bg-yellow-400' : 'bg-teal-500';
+            const barColCat = isOver ? 'bg-red-400' : pctCat > 80 ? 'bg-amber-400' : 'bg-emerald-500';
             const remBadge  = catBudget > 0
                 ? isOver
                     ? `<span class="text-xs font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded-lg">-¥${Math.abs(catRem).toLocaleString()}</span>`
-                    : `<span class="text-xs text-teal-600">残¥${catRem.toLocaleString()}</span>`
+                    : `<span class="text-xs" style="color:#4f46e5">残¥${catRem.toLocaleString()}</span>`
                 : '';
             html += `
             <div class="${isOver ? 'bg-red-50 rounded-xl p-2 -mx-1' : ''}">
